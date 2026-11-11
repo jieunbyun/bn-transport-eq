@@ -8,12 +8,11 @@ after each. It takes about 5 minutes.
 
 ## Start
 
-Run these commands from the app repository folder, with the `rsr` repository
-alongside it as described in the main README.
+Run these commands from the app repository folder, in the environment the main
+README creates (it installs rsr, `rsr-duco`, from PyPI).
 
 ```powershell
 conda activate quakenet
-python -m pip install -e ../rsr
 python -m src serve
 ```
 

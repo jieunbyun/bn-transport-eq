@@ -35,8 +35,8 @@ sample() times each call, so every up and down step has its own cost. What each 
 also declared beside its function (@message, @root), and describe() hands those declarations to the
 app, which draws them on the tree.
 
-The certificate MCMC comes from rsr.mcmc, in the rsr repository's working tree. It is imported where
-it is used, so the app can read describe() without it.
+The certificate MCMC comes from rsr.mcmc (rsr-duco 0.3.1 or later, from PyPI). It is imported where it is
+used, so the app can read describe() without it.
 """
 
 from __future__ import annotations

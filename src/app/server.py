@@ -621,8 +621,8 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             return self._json({"error": (f"The session needs {exc.name or 'a module'}, which this Python "
                                          f"({sys.executable}) cannot load. Start the server in the quakenet "
-                                         "environment (conda activate quakenet), with the rsr working tree on "
-                                         "PYTHONPATH (see .env).")},
+                                         "environment (conda activate quakenet), which installs rsr-duco 0.3.1 "
+                                         "or later (environment.yml).")},
                               HTTPStatus.SERVICE_UNAVAILABLE)
         except Exception as exc:
             traceback.print_exc()

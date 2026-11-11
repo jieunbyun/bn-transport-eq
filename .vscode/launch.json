@@ -1,6 +1,6 @@
 {
     // Debug configurations. The interpreter is the one in settings.json (the quakenet env).
-    // PYTHONPATH puts the rsr working tree (for rsr.mcmc) and this repository first.
+    // PYTHONPATH puts this repository first; rsr (rsr.mcmc) is the installed rsr-duco, from PyPI.
     "version": "0.2.0",
     "configurations": [
         {
@@ -10,7 +10,7 @@
             "program": "${workspaceFolder}/examples/clique-sampling/compare.py",
             "args": ["--example", "toy-ca"],
             "cwd": "${workspaceFolder}",
-            "env": {"PYTHONPATH": "${workspaceFolder}/../rsr;${workspaceFolder}", "PYTHONDONTWRITEBYTECODE": "1"},
+            "env": {"PYTHONPATH": "${workspaceFolder}", "PYTHONDONTWRITEBYTECODE": "1"},
             "console": "integratedTerminal",
             "justMyCode": true
         },
@@ -21,7 +21,7 @@
             "program": "${workspaceFolder}/examples/clique-sampling/compare.py",
             "args": ["--example", "ema-highway"],
             "cwd": "${workspaceFolder}",
-            "env": {"PYTHONPATH": "${workspaceFolder}/../rsr;${workspaceFolder}", "PYTHONDONTWRITEBYTECODE": "1"},
+            "env": {"PYTHONPATH": "${workspaceFolder}", "PYTHONDONTWRITEBYTECODE": "1"},
             "console": "integratedTerminal",
             "justMyCode": true
         },
@@ -31,7 +31,7 @@
             "request": "launch",
             "program": "${file}",
             "cwd": "${workspaceFolder}",
-            "env": {"PYTHONPATH": "${workspaceFolder}/../rsr;${workspaceFolder}", "PYTHONDONTWRITEBYTECODE": "1"},
+            "env": {"PYTHONPATH": "${workspaceFolder}", "PYTHONDONTWRITEBYTECODE": "1"},
             "console": "integratedTerminal",
             "justMyCode": true
         }

@@ -17,11 +17,10 @@ Eastern Massachusetts highway benchmark network.
 Install **Git** and **Miniconda** (or Anaconda). On Windows, run the following
 commands in Anaconda Prompt; on macOS or Linux, use a terminal with Conda available.
 
-Download the app and its RSR inference dependency:
+Download the app:
 
 ```sh
 git clone https://github.com/jieunbyun/bn-transport-eq.git
-git clone https://github.com/jieunbyun/rsr.git
 cd bn-transport-eq
 ```
 
@@ -30,9 +29,11 @@ Create the Python environment and start the app:
 ```sh
 conda env create -f environment.yml
 conda activate quakenet
-python -m pip install -e ../rsr
 python -m src serve --open --example ema-highway/gmm
 ```
+
+The environment installs rsr (`rsr-duco` 0.3.1 or later) from PyPI. To work on rsr alongside the app,
+install your rsr checkout over it instead: `python -m pip install -e ../rsr`.
 
 The app opens at **http://127.0.0.1:8765**. Keep the terminal open while using it.
 Run a baseline, select the decision task, then add observations and run another
