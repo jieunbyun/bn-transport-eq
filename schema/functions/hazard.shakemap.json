@@ -1,19 +1,11 @@
 {
   "$schema": "../meta/function.schema.json",
   "id": "hazard.shakemap",
-  "label": "USGS ShakeMap, one IM at each bridge, from grid.xml and uncertainty.xml",
-  "version": "0.3.0",
+  "label": "USGS ShakeMap: ln IM at the bridges as a Gaussian field, from grid.xml and uncertainty.xml",
+  "version": "0.4.0",
   "role": "hazard",
   "per": "Bridge",
-  "inputs": [
-    {
-      "name": "epsilon",
-      "quantity": "GMResidual",
-      "over": "Bridge",
-      "via": "self",
-      "description": "This bridge's residual, from a field that carries the correlation between bridges."
-    }
-  ],
+  "inputs": [],
   "outputs": [
     {
       "name": "im",
@@ -23,9 +15,6 @@
   "attributes": [
     "lat",
     "lon"
-  ],
-  "tables": [
-    "Bridge"
   ],
   "instance_schema": {
     "type": "object",
@@ -66,9 +55,10 @@
       }
     }
   },
+  "correlation_model": "spatial-correlation",
   "implementation": "src.builder.kernels.hazard:ShakeMap",
-  "deterministic": true,
-  "drawKind": "Marginal",
+  "deterministic": false,
+  "drawKind": "Joint",
   "capabilities": [
     "SampleForward",
     "EvaluateLikelihood"
@@ -76,5 +66,5 @@
   "source": {
     "citation": "USGS ShakeMap grid.xml and uncertainty.xml, PSA(1.0 s), read through src/builder/shakemap.py."
   },
-  "description": "ln IM = ln median + sigma * epsilon, with the median from grid.xml (e.g. PSA10 for SA(1.0)) and sigma from uncertainty.xml (STDPSA10), both interpolated bilinearly on the log scale at the site. Deterministic given epsilon: the randomness, and the dependence between sites, live in the residual field. A bridge off the map gets the map's value at its nearest edge, an upper bound (USGS maps reach to where shaking has faded to light), not zero; a map that reaches no bridge is refused; a map without uncertainty.xml gives sigma = 0 and says so."
+  "description": "ln IM at the bridges as one Gaussian field, ln IM ~ N(mu, D R D) with D = diag(sigma): mu from grid.xml (e.g. PSA10 for SA(1.0)) and sigma from uncertainty.xml (STDPSA10), both interpolated bilinearly on the log scale at each bridge. R is the binding's correlation (a spatial-correlation set); without one the bridges are independent. A bridge off the map gets the map's value at its nearest edge, an upper bound (USGS maps reach to where shaking has faded to light), not zero; a map that reaches no bridge is refused; a map without uncertainty.xml gives sigma = 0 and says so. The map is already conditioned on its seismic stations: a station's reading entered again as SAObs counts twice."
 }

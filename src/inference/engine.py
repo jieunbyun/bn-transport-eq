@@ -206,6 +206,14 @@ def compile_query(query: Mapping[str, Any]) -> Compiled:
                                  "choose another set with parameter_sets instead")
             b["parameters"] = {**b["parameters"], **values}
     for fn_id, set_id in query.get("parameter_sets", {}).items():
+        if fn_id in lib.models:                   # a model a function uses, e.g. the hazard field's correlation
+            targets = [b for b in assembly["bindings"]
+                       if lib.functions.get(b["function"], {}).get("correlation_model") == fn_id]
+            if not targets:
+                raise QueryError(f"no function in {assembly['id']} uses {fn_id}")
+            for b in targets:
+                b["correlation"] = set_id
+            continue
         targets = [b for b in assembly["bindings"] if b["function"] == fn_id]
         if not targets:
             raise QueryError(f"{fn_id} is not bound in {assembly['id']}; bound: {', '.join(bound)}")
@@ -628,6 +636,10 @@ def describe(assembly_id: str) -> dict[str, Any]:
             sets = [{"id": sid, "label": lib.parameter_sets[sid]["label"]} for sid in b.spec["parameter_set_by_location"]]
             choices.append({"function": fn["id"], "current": None, "by_location": dict(Counter(b.parameter_sets)),
                             "choices": sets})
+        if model := fn.get("correlation_model"):
+            # The correlation between the function's rows, set by a query's parameter_sets under the model's id.
+            sets = [{"id": sid, "label": s["label"]} for sid, s in lib.parameter_sets.items() if s.get("model") == model]
+            choices.append({"function": model, "current": b.correlation or "independent.any-im", "choices": sets})
 
     names = {r["id"]: r["name"] for r in network.rows("Node") if r.get("name")}
     siblings = [{"id": assembly_id_of(p), "label": load_assembly(p)["label"]}

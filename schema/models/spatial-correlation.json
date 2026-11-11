@@ -1,0 +1,47 @@
+{
+  "$schema": "../meta/model.schema.json",
+  "id": "spatial-correlation",
+  "label": "Spatial correlation of ln IM between bridges",
+  "role": "hazard",
+  "instance_schema": {
+    "type": "object",
+    "required": [
+      "model"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "model": {
+        "enum": [
+          "jayaram-baker-2009",
+          "independent"
+        ]
+      },
+      "period_s": {
+        "description": "Spectral period of the IM the field describes; sets the correlation range. Required for jayaram-baker-2009.",
+        "type": "number",
+        "minimum": 0
+      },
+      "vs30_clustered": {
+        "description": "Jayaram & Baker (2009) case 2 (Vs30 clustered, b = 40.7 - 15.0 T) rather than case 1 (b = 8.5 + 17.2 T). Matters only below T = 1 s; at and above it b = 22.0 + 3.7 T either way.",
+        "type": "boolean"
+      }
+    },
+    "if": {
+      "properties": {
+        "model": {
+          "const": "jayaram-baker-2009"
+        }
+      }
+    },
+    "then": {
+      "required": [
+        "period_s",
+        "vs30_clustered"
+      ]
+    }
+  },
+  "source": {
+    "citation": "Jayaram, N. and Baker, J. W. (2009). Correlation model for spatially distributed ground-motion intensities. Earthquake Engineering & Structural Dynamics 38(15), 1687-1708."
+  },
+  "description": "The correlation R between the ln IM of a hazard field's bridges: R_ij = exp(-3 h_ij / b), h_ij the great-circle distance in km and b the range at the IM's period, or R = I for independent bridges. The field is ln IM ~ N(mu, D R D), D = diag(sigma), with mu and sigma from the function (a GMM, a ShakeMap). Applied to a total sigma, or to a ShakeMap's station-conditioned sigma, it is an approximation: Jayaram & Baker fit it to within-event residuals, and conditioning on stations changes the correlation."
+}

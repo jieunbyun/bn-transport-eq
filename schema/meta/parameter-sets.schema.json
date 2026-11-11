@@ -2,12 +2,23 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "parameter-sets.schema.json",
   "title": "Parameter sets",
-  "description": "A collection of parameter sets for one function, e.g. the 28 Hazus bridge classes for one fragility function. Each set's `values` must satisfy that function's `parameters` schema; a few sets serve many rows, which is how a handful of curves describes every bridge.",
+  "description": "A collection of parameter sets for one function, e.g. the 28 Hazus bridge classes for one fragility function, or for one model a function uses (e.g. the spatial correlation of a hazard field). Each set's `values` must satisfy that function's or model's `instance_schema`; a few sets serve many rows, which is how a handful of curves describes every bridge.",
   "type": "object",
   "required": [
-    "function",
     "source",
     "sets"
+  ],
+  "oneOf": [
+    {
+      "required": [
+        "function"
+      ]
+    },
+    {
+      "required": [
+        "model"
+      ]
+    }
   ],
   "additionalProperties": false,
   "properties": {
@@ -15,6 +26,10 @@
       "type": "string"
     },
     "function": {
+      "type": "string"
+    },
+    "model": {
+      "description": "A model under schema/models/, for sets that parameterise part of a function rather than a function (e.g. spatial-correlation).",
       "type": "string"
     },
     "source": {

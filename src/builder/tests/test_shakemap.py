@@ -296,12 +296,12 @@ def test_a_shakemap_supplies_sa1_to_the_hebei_bn(shakecast_dir):
                             "parameters": {"hazard.shakemap": {"event_id": "ev1"}}, "samples": 100})
     summary = result["targets"][0]["summary"]
     assert summary["p50"] == pytest.approx(exp(ln_sa_field(site["lat"], site["lon"])), rel=1e-3)
-    assert result["computed"] == ["hazard.spatial-correlation", "hazard.shakemap"]   # only what the target needs
+    assert result["computed"] == ["hazard.shakemap"]                     # only what the target needs
     assert any("ShakeMap ev1 version 1" in w for w in result["warnings"])
     assert any("no seismic station" in w for w in result["warnings"])
 
 
-def test_nearby_sites_share_their_residuals_unless_told_otherwise(shakecast_dir):
+def test_nearby_sites_share_their_shaking_unless_told_otherwise(shakecast_dir):
     write_grid(shakecast_dir / "ev3" / "ev3-1", "ev3", 1, sigma=0.6)
     sites = engine.compile_query({"assembly": "hebei-transport/shakemap"}).network.rows("Bridge")
     a, b = min(((x, y) for i, x in enumerate(sites) for y in sites[i + 1:]),
@@ -310,7 +310,7 @@ def test_nearby_sites_share_their_residuals_unless_told_otherwise(shakecast_dir)
     def correlation(set_id):
         compiled = engine.compile_query({"assembly": "hebei-transport/shakemap",
                                          "parameters": {"hazard.shakemap": {"event_id": "ev3"}},
-                                         "parameter_sets": {"hazard.spatial-correlation": set_id}})
+                                         "parameter_sets": {"spatial-correlation": set_id}})
         x = engine.sample_nodes(compiled, 20000, seed=5)
         return np.corrcoef(np.log(x[f"SA(1.0)::{a['id']}"]), np.log(x[f"SA(1.0)::{b['id']}"]))[0, 1]
 

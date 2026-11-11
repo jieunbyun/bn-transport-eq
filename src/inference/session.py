@@ -31,6 +31,7 @@ import torch
 from src.cancellation import check_cancelled
 
 from src.builder.kernels import Probability
+from src.builder.kernels.observation import ObservedIntensity
 from . import cliques
 
 N_GROUP = 20
@@ -233,8 +234,10 @@ class Session:
         Adds an evidence entry to the timeline, with every decision query's values after it."""
         if var in self.evidence:
             raise ValueError(f"{var} is already in the evidence")
-        if any(var == c["SA"] for c in self.t["edges"]):
-            raise ValueError("SA is observed only through SAObs, not directly")
+        if var in self.variables and isinstance(self.variables[var].values, tuple) \
+                and not isinstance(self.producer[var], ObservedIntensity):        # SA
+            raise ValueError(f"{var} cannot be observed directly: ground motion is observed only through a "
+                             "station's reading (SAObs), through its measurement likelihood")
         value = self._state(var, value)
         previous = self._snapshot()
         self.evidence[var] = value

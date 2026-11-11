@@ -1,16 +1,22 @@
-"""Ground-motion kernels: everything that produces an IM or its residual.
+"""Ground-motion kernels: everything that produces an IM.
 
-A field drawn jointly over its sites (``Gmm``, ``SpatialCorrelationField``) is one
-object owning every site, so the dependence between sites lives inside one object
-and is never an implicit product of independent objects.
+Every hazard function gives ln IM at its sites as one Gaussian field,
+
+    ln IM ~ N(mu, Sigma),    Sigma = D R D,    D = diag(sigma),
+
+drawn jointly by one object owning every site (``GaussianField``), so the dependence between
+sites lives inside that object and is never an implicit product of independent objects. The
+function supplies mu and sigma (``Gmm`` from a ground-motion model, ``ShakeMap`` from a USGS
+map); the binding's correlation supplies R (``correlation_matrix``), the identity without one.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
-from torch.distributions import LogNormal, Normal
+from torch.distributions import LogNormal
 
 from . import Probability
 
@@ -74,23 +80,138 @@ def fixed_event(table: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 # ======================================================================
-class Gmm(Probability):
-    """Ground motion at n sites from one fixed earthquake, by a ground-motion model.
+def jayaram_baker_2009_range_km(period_s: float, vs30_clustered: bool) -> float:
+    """Range b of rho(h) = exp(-3h / b): case 1 (eq. 17) or, with Vs30 clustering, case 2 (eq. 18) below 1 s."""
+    if period_s < 1.0:
+        return 40.7 - 15.0 * period_s if vs30_clustered else 8.5 + 17.2 * period_s
+    return 22.0 + 3.7 * period_s
 
-        ln IM_i = ln_median_i + sigma_i * eps_i,    eps_i ~ N(0, 1), independent between sites
 
-    A root: the earthquake is fixed data, not a parent.
+def correlation_range_km(correlation: dict[str, Any] | None) -> float | None:
+    """The range b of a spatial-correlation set (schema/models/spatial-correlation.json); None if independent."""
+    if correlation is None or correlation["model"] == "independent":
+        return None
+    return jayaram_baker_2009_range_km(correlation["period_s"], correlation["vs30_clustered"])
+
+
+def correlation_matrix(lat: torch.Tensor, lon: torch.Tensor, range_km: float | None) -> torch.Tensor:
+    """R_ij = exp(-3 h_ij / range_km), h_ij the distance between sites i and j; the identity without a range."""
+    if range_km is None:
+        return torch.eye(len(lat), dtype=torch.float64)
+    distance = great_circle_km(lat[:, None], lon[:, None], lat[None, :], lon[None, :])
+    return torch.exp(-3.0 * distance / range_km)
+
+
+# ======================================================================
+class GaussianField(Probability):
+    """ln IM at n sites as one Gaussian field, drawn jointly:
+
+        ln IM ~ N(mu, Sigma),    Sigma = D R D,    D = diag(sigma)
+        R_ij = exp(-3 h_ij / b)  (Jayaram & Baker 2009), or R = I without a correlation
+
+    h_ij is the great-circle distance between sites i and j. A subclass sets mu and sigma
+    (``_field``); a root, with no parents. Sigma's root comes from its eigendecomposition rather
+    than a Cholesky factor: co-located sites (R_ij = 1) and sites with sigma = 0 make Sigma
+    singular, and the field then lives on the span of the directions with positive variance,
+    where log_prob is its density.
     """
 
-    def __init__(self, childs, parents, event, gmm, sites, device="cpu"):
+    _TOL = 1e-10
+    function_id = "the hazard"
+
+    def _field(self, sites, ln_median, sigma, correlation):
+        """Set the field: sites [{"lat", "lon"}], one per child; ln_median and sigma (n,); correlation a
+        spatial-correlation set's values (with its "id"), or None for independent sites."""
+        self.ln_median = self.tensor(ln_median)                              # mu, (n,)
+        self.sigma = self.tensor(sigma)                                      # (n,)
+        self.correlation_id = (correlation or {}).get("id")
+        self.range_km = correlation_range_km(correlation)
+        lat, lon = _t([s["lat"] for s in sites]), _t([s["lon"] for s in sites])
+        self.corr = correlation_matrix(lat, lon, self.range_km).to(self.device)            # R, (n, n)
+        values, vectors = torch.linalg.eigh(self.sigma[:, None] * self.corr * self.sigma[None, :])
+        keep = values > self._TOL                                            # directions with positive variance
+        self.root = vectors[:, keep] * values[keep].sqrt()                  # ln IM = mu + root z, z ~ N(0, I)
+        self.whiten = vectors[:, keep] / values[keep].sqrt()                # z = (ln IM - mu) whiten
+        self.log_det = values[keep].log().sum()
+        if self.range_km is None and len(self.childs) > 1:
+            self.notes.add(f"{self.function_id} draws each Bridge's ln IM independently: no spatial correlation, "
+                           "so joint outcomes across the network are likely understated")
+
+    # ------------------------------------------------------------------
+    def _sigma_text(self) -> str:
+        if torch.allclose(self.sigma, self.sigma[0]):
+            return f"{self.sigma[0].item():.3g}"
+        return f"{self.sigma.min().item():.3g} to {self.sigma.max().item():.3g}"
+
+    def _correlation_text(self) -> str:
+        if self.range_km is None:
+            return "independent sites"
+        named = f" [{self.correlation_id}]" if self.correlation_id else ""
+        return f"R_ij = exp(-3 h_ij / {self.range_km:.3g} km){named}"
+
+    def form(self):
+        return (f"ln IM ~ N(mu, D R D) at {_sites(len(self.childs))}, sigma {self._sigma_text()}, "
+                f"{self._correlation_text()}{self.parameter_sets()}")
+
+    # ------------------------------------------------------------------
+    def distribution(self, n_sample: int) -> LogNormal:
+        """Each site's IM on its own, for n_sample samples: LogNormal of shape (n_sample, n) (the EvaluateDensity
+        capability). The marginals only: the sites' dependence is in sample and log_prob."""
+        shape = (n_sample, len(self.childs))
+        return LogNormal(self.ln_median.expand(shape), self.sigma.expand(shape))
+
+    def sample(self, Cs_pars=None, n_sample=None):
         """
-        childs  : [Variable IM_1, ..., Variable IM_n], one per site, in g
-        parents : [] -- this node does not have parents: the EQ scenario is a fixed parameter
-        event   : the earthquake, {"id", "mw", "lat", "lon", "depth_km"}
-        gmm     : the ground-motion model, one parameter set for every site: its "form" (a key of
-                  GMM_FORMS), "coefficients", aleatory "sigma", "sigma_epistemic",
-                  "magnitude_range" and "distance_metric"
-        sites   : [{"id", "lat", "lon"}], one per child, in the same order
+        n_sample : number of samples (a root: no Cs_pars)
+
+        Returns
+        -------
+        Cs   : (n_sample, n) IM at each site
+        logp : (n_sample,) log density of each sample
+        """
+        if n_sample is None:
+            n_sample = len(Cs_pars)
+        z = torch.randn(n_sample, self.root.shape[1], dtype=torch.float64, device=self.device)
+        Cs = torch.exp(self.ln_median + z @ self.root.T)
+        return Cs, self.log_prob(Cs)
+
+    def log_prob(self, Cs):
+        """
+        Cs : (N, n) IM at each site (no parent columns: a root)
+
+        Returns (N,) the joint log density of the IMs on the field's support; -inf where an IM is not
+        positive and finite
+        """
+        x = Cs.to(device=self.device, dtype=torch.float64)[:, :len(self.childs)]
+        valid = (x > 0).all(1) & torch.isfinite(x).all(1)
+        ln_x = x.clamp_min(torch.finfo(x.dtype).tiny).log()
+        z = (ln_x - self.ln_median) @ self.whiten
+        logp = (-0.5 * z**2).sum(1) - 0.5 * z.shape[1] * math.log(2 * math.pi) - 0.5 * self.log_det - ln_x.sum(1)
+        return torch.where(valid, logp, -torch.inf)
+
+
+# ======================================================================
+class Gmm(GaussianField):
+    """Ground motion at n sites from one fixed earthquake, by a ground-motion model:
+
+        ln IM ~ N(mu, D R D),    mu_i = ln median at site i,    D = diag(sigma)
+
+    mu and sigma from the GMM at each site's hypocentral distance; R from the binding's correlation,
+    the identity without one. A root: the earthquake is fixed data, not a parent.
+    """
+
+    function_id = "hazard.gmm"
+
+    def __init__(self, childs, parents, event, gmm, sites, correlation=None, device="cpu"):
+        """
+        childs      : [Variable IM_1, ..., Variable IM_n], one per site, in g
+        parents     : [] -- this node does not have parents: the EQ scenario is a fixed parameter
+        event       : the earthquake, {"id", "mw", "lat", "lon", "depth_km"}
+        gmm         : the ground-motion model, one parameter set for every site: its "form" (a key of
+                      GMM_FORMS), "coefficients", aleatory "sigma", "sigma_epistemic",
+                      "magnitude_range" and "distance_metric"
+        sites       : [{"id", "lat", "lon"}], one per child, in the same order
+        correlation : a spatial-correlation set's values (and its "id"), or None for independent sites
         """
         super().__init__(childs, parents, device)
         assert not parents, "Gmm is a root: the EQ scenario is a fixed parameter, not a parent"
@@ -112,110 +233,70 @@ class Gmm(Probability):
         # GMM parameters: the ln median and total sigma at each site.
         ln_median, sigma_aleatory = GMM_FORMS[gmm["form"]](_t(event["mw"]), r, [gmm])
         sigma = torch.sqrt(sigma_aleatory**2 + _t(gmm["sigma_epistemic"]) ** 2)
-        self.ln_median = self.tensor(ln_median.expand(len(childs)))          # (n,)
-        self.sigma = self.tensor(sigma.expand(len(childs)))                  # (n,)
-        self.notes.add("hazard.gmm draws each Bridge's residual independently: i.e. no spatial correlation")
-
-    # ------------------------------------------------------------------
-    def form(self):
-        sigma = (f"{self.sigma[0].item():.3g}" if torch.allclose(self.sigma, self.sigma[0]) else
-                 f"{self.sigma.min().item():.3g} to {self.sigma.max().item():.3g}")
-        return (f"lognormal at {_sites(len(self.childs))}: ln IM = ln median + sigma * eps, sigma {sigma}, "
-                f"eps independent{self.parameter_sets()}")
+        self._field(sites, ln_median.expand(len(childs)), sigma.expand(len(childs)), correlation)
 
     def form_details(self):
         e = self.event
-        return [f"ln median by {self.gmm_form} for event {e['id']} (Mw {e['mw']:g}, {e['depth_km']:g} km deep, "
-                f"at ({e['lat']:g}, {e['lon']:g}); hypocentral distance)"] + super().form_details()
-
-    # ------------------------------------------------------------------
-    def distribution(self, n_sample: int) -> LogNormal:
-        """IM at each site, for n_sample samples: LogNormal of shape (n_sample, n) (the EvaluateDensity capability)."""
-        shape = (n_sample, len(self.childs))
-        return LogNormal(self.ln_median.expand(shape), self.sigma.expand(shape))
-
-    def sample(self, Cs_pars=None, n_sample=None):
-        """
-        n_sample : number of samples (a root: no Cs_pars)
-
-        Returns
-        -------
-        Cs   : (n_sample, n) IM at each site
-        logp : (n_sample,) log density of each sample, summed over the sites
-        """
-        if n_sample is None:
-            n_sample = len(Cs_pars)
-        dist = self.distribution(n_sample)
-
-        Cs = dist.sample()
-        logp = dist.log_prob(Cs).sum(1)
-        return Cs, logp
-
-    def log_prob(self, Cs):
-        """
-        Cs : (N, n) IM at each site (no parent columns: a root)
-
-        Returns (N,) log density, summed over the sites; -inf where an IM is not positive and finite
-        """
-        Cs = Cs.to(device=self.device, dtype=torch.float64)[:, :len(self.childs)]
-        dist = self.distribution(len(Cs))
-
-        valid = (Cs > 0).all(1) & torch.isfinite(Cs).all(1)
-        logp = dist.log_prob(Cs.clamp_min(torch.finfo(Cs.dtype).tiny)).sum(1)
-        return torch.where(valid, logp, -torch.inf)
+        return [f"mu by {self.gmm_form} for event {e['id']} (Mw {e['mw']:g}, {e['depth_km']:g} km deep, "
+                f"at ({e['lat']:g}, {e['lon']:g}); hypocentral distance); sigma the GMM's total"] + super().form_details()
 
 
 # ======================================================================
-class ShakeMap(Probability):
-    """Ground motion at one site from a USGS ShakeMap, given the site's residual eps (deterministic).
+class ShakeMap(GaussianField):
+    """Ground motion at n sites from a USGS ShakeMap, as a Gaussian field:
 
-        ln IM = ln_median + sigma * eps
+        ln IM ~ N(mu, D R D),    D = diag(sigma)
 
-    ln_median is the map's median at the site (grid.xml, e.g. PSA10) and sigma its uncertainty
-    (uncertainty.xml, e.g. STDPSA10). The residual eps is drawn for every site jointly by a
-    SpatialCorrelationField.
+    mu is the map's ln median at each site (grid.xml, e.g. PSA10) and sigma its uncertainty
+    (uncertainty.xml, e.g. STDPSA10); R from the binding's correlation, the identity without one.
 
     A site off the map is given the map's value at the nearest point of its edge, sigma included. USGS sizes
     a map to reach where the shaking it predicts has faded to light (about MMI IV), and shaking keeps falling
     with distance, so that is an upper bound on the site's shaking, not zero and not a guess at it. A map that
-    reaches none of the sites (``sites``, every site of the binding) is refused: it is some other region's.
+    reaches none of the sites is refused: it is some other region's.
     """
 
-    def __init__(self, childs, parents, event_id, imt, lat, lon, source=None, version=None, sites=None,
+    function_id = "hazard.shakemap"
+
+    def __init__(self, childs, parents, event_id, imt, sites, source=None, version=None, correlation=None,
                  device="cpu"):
         """
-        childs   : [Variable IM], in g
-        parents  : [Variable eps], the site's standardised residual
-        event_id : the ShakeMap's USGS event id
-        imt      : the intensity measure, e.g. "SA(1.0)"
-        lat, lon : the site, in degrees
-        source   : where to fetch the map ("shakecast" or "comcat"); None for shakemap.load's default
-        version  : the map version; None for the current one
-        sites    : [[lat, lon], ...] of every site on this map, to refuse a map that reaches none of them
+        childs      : [Variable IM_1, ..., Variable IM_n], one per site, in g
+        parents     : [] (a root)
+        event_id    : the ShakeMap's USGS event id
+        imt         : the intensity measure, e.g. "SA(1.0)"
+        sites       : [{"id", "lat", "lon"}], one per child, in the same order
+        source      : where to fetch the map ("shakecast" or "comcat"); None for shakemap.load's default
+        version     : the map version; None for the current one
+        correlation : a spatial-correlation set's values (and its "id"), or None for independent sites
         """
         from .. import shakemap   # imported late: only this kernel fetches data
 
         super().__init__(childs, parents, device)
-        assert len(childs) == 1 and len(parents) == 1, "ShakeMap: one IM child, one eps parent"
+        assert not parents and len(sites) == len(childs), "a root, with one site per child"
 
         # shakemap.load caches the parsed grid, and re-asks which version is current
         # every few minutes, so a long-running server picks up a revised map.
         grid = shakemap.load(event_id, source, version, imt)
-        ln_median, sigma, inside = grid.sample([lat], [lon])
-        self.outside_km = 0.0
-        if not inside[0]:
-            if sites is not None and not grid.sample([s[0] for s in sites], [s[1] for s in sites])[2].any():
-                raise ValueError(f"ShakeMap {grid.event_id} v{grid.version} reaches none of the {len(sites)} sites; "
-                                 f"it maps another region's shaking")
-            edge_lat, edge_lon = grid.nearest_on_map([lat], [lon])
-            ln_median, sigma, _ = grid.sample(edge_lat, edge_lon)
-            self.outside_km = float(great_circle_km(lat, lon, float(edge_lat[0]), float(edge_lon[0])))
-            self.notes.add(f"{childs[0].name}'s site lies {self.outside_km:.0f} km off ShakeMap {grid.event_id} "
-                           f"v{grid.version}: it is given the map's value at the nearest edge, an upper bound, since "
-                           f"USGS maps reach to where shaking has faded to light and it falls further with distance.")
-        self.ln_median = float(ln_median[0])
-        self.sigma = float(sigma[0])
+        lat, lon = [s["lat"] for s in sites], [s["lon"] for s in sites]
+        ln_median, sigma, inside = grid.sample(lat, lon)
+        if not inside.any():
+            raise ValueError(f"ShakeMap {grid.event_id} v{grid.version} reaches none of the {len(sites)} sites; "
+                             f"it maps another region's shaking")
+        self.outside_km = torch.zeros(len(sites), dtype=torch.float64)
+        if not inside.all():
+            off = (~inside).nonzero()[0]
+            edge_lat, edge_lon = grid.nearest_on_map([lat[i] for i in off], [lon[i] for i in off])
+            ln_median[off], sigma[off], _ = grid.sample(edge_lat, edge_lon)
+            self.outside_km[off] = great_circle_km(_t([lat[i] for i in off]), _t([lon[i] for i in off]),
+                                                   _t(edge_lat), _t(edge_lon))
+            far = int(self.outside_km.argmax())
+            self.notes.add(f"{len(off)} of {len(sites)} sites lie off ShakeMap {grid.event_id} v{grid.version} (up to "
+                           f"{self.outside_km[far]:.0f} km, {childs[far].name}): each is given the map's value at the "
+                           f"nearest edge, an upper bound, since USGS maps reach to where shaking has faded to light and "
+                           f"it falls further with distance.")
         self.source = f"ShakeMap {grid.event_id} v{grid.version}, {imt}"
+        self._field(sites, _t(ln_median), _t(sigma), correlation)
 
         meta = grid.meta
         self.notes.add(f"Ground motion from USGS ShakeMap {grid.event_id} version {grid.version} "
@@ -226,124 +307,5 @@ class ShakeMap(Probability):
         for warning in grid.warnings:
             self.notes.add(warning)
 
-    def form(self):
-        eps = self.parents[0].name
-        return (f"ln IM = {self.ln_median:.4g} + {self.sigma:.3g} * {eps}, from {self.source}")
-
-    def evaluate(self, Cs_pars):
-        """
-        Cs_pars : (N, 1) eps
-        Returns (N, 1) IM
-        """
-        eps = Cs_pars[:, :1]
-        return torch.exp(self.ln_median + self.sigma * eps)
-
-
-# ======================================================================
-def jayaram_baker_2009_range_km(period_s: float, vs30_clustered: bool) -> float:
-    """Range b of rho(h) = exp(-3h / b): case 1 (eq. 17) or, with Vs30 clustering, case 2 (eq. 18) below 1 s."""
-    if period_s < 1.0:
-        return 40.7 - 15.0 * period_s if vs30_clustered else 8.5 + 17.2 * period_s
-    return 22.0 + 3.7 * period_s
-
-
-def correlation_matrix(lat: torch.Tensor, lon: torch.Tensor, range_km: float | None) -> torch.Tensor:
-    """R_ij = exp(-3 h_ij / range_km), h_ij the distance between sites i and j; the identity without a range."""
-    if range_km is None:
-        return torch.eye(len(lat), dtype=torch.float64)
-    distance = great_circle_km(lat[:, None], lon[:, None], lat[None, :], lon[None, :])
-    return torch.exp(-3.0 * distance / range_km)
-
-
-class SpatialCorrelationField(Probability):
-    """Standardised ground-motion residuals eps at n sites, drawn jointly.
-
-        eps = V sqrt(L) z,    z_i ~ N(0, 1) iid, optionally truncated at +/- truncation
-        V L V' = R,           R_ij = exp(-3 h_ij / range_km)       (Jayaram & Baker 2009)
-
-    h_ij is the distance between sites i and j; without range_km the sites are independent
-    (R = I). A symmetric root rather than Cholesky: co-located sites have correlation 1,
-    which makes R singular, and the eigendecomposition takes that in its stride. The log
-    probability is the density on the field's support, z = L^-1/2 V' eps over the directions
-    with positive variance.
-    """
-
-    _TOL = 1e-10
-
-    def __init__(self, childs, parents, sites, correlation, device="cpu"):
-        """
-        childs      : [Variable eps_1, ..., Variable eps_n], one per site
-        parents     : [] (a root)
-        sites       : [{"id", "lat", "lon"}], one per child, in the same order
-        correlation : the correlation model's parameter set: "model" ("independent", or
-                      "jayaram-baker-2009" with "period_s" and "vs30_clustered", which set the
-                      range), and "truncation_level" (null for none)
-        """
-        super().__init__(childs, parents, device)
-        assert not parents and len(sites) == len(childs), "a root, with one site per child"
-        self.source = correlation["model"]
-        self.truncation = correlation["truncation_level"]
-        self.range_km = (None if correlation["model"] == "independent" else
-                         jayaram_baker_2009_range_km(correlation["period_s"], correlation["vs30_clustered"]))
-        if self.range_km is None:
-            self.notes.add("Ground-motion residuals are drawn independently at each site: no spatial "
-                           "correlation, so joint outcomes across the network are likely understated.")
-
-        lat, lon = _t([s["lat"] for s in sites]), _t([s["lon"] for s in sites])
-        values, vectors = torch.linalg.eigh(correlation_matrix(lat, lon, self.range_km))
-        self.support = values > self._TOL                                    # directions with positive variance
-        self.values = values.clamp_min(0.0).to(self.device)                  # L, (n,)
-        self.vectors = vectors.to(self.device)                               # V, (n, n)
-
-        normal = Normal(self.tensor(0.0), self.tensor(1.0))
-        t = self.truncation
-        self.bounds = None if t is None else (normal.cdf(self.tensor(-t)), normal.cdf(self.tensor(t)))
-
-    # ------------------------------------------------------------------
-    def form(self):
-        n = _sites(len(self.childs))
-        truncated = "" if self.truncation is None else f", truncated at +/-{self.truncation:g}"
-        if self.range_km is None:
-            return f"independent standard normals at {n}{truncated}{self.parameter_sets()}"
-        return (f"standard normals at {n}, correlated by {self.source}: "
-                f"rho(h) = exp(-3h / {self.range_km:.3g} km){truncated}{self.parameter_sets()}")
-
-    # ------------------------------------------------------------------
-    def _z(self, n_sample: int) -> torch.Tensor:
-        """(n_sample, n) independent standard normals, truncated if asked."""
-        shape = (n_sample, len(self.childs))
-        if self.bounds is None:
-            return torch.randn(shape, dtype=torch.float64, device=self.device)
-        lo, hi = self.bounds
-        u = lo + (hi - lo) * torch.rand(shape, dtype=torch.float64, device=self.device)
-        return torch.special.ndtri(u)
-
-    def sample(self, Cs_pars=None, n_sample=None):
-        """
-        n_sample : number of samples (a root: no Cs_pars)
-
-        Returns
-        -------
-        Cs   : (n_sample, n) eps at each site
-        logp : (n_sample,) log density of each sample
-        """
-        if n_sample is None:
-            n_sample = len(Cs_pars)
-        z = self._z(n_sample)
-        eps = z @ (self.vectors * self.values.sqrt()).T
-        return eps, self.log_prob(eps)
-
-    def log_prob(self, Cs):
-        """
-        Cs : (N, n) eps at each site (no parent columns: a root)
-
-        Returns (N,) log density on the field's support; -inf outside a truncation
-        """
-        eps = Cs.to(device=self.device, dtype=torch.float64)[:, :len(self.childs)]
-        lam = self.values[self.support]
-        z = (eps @ self.vectors[:, self.support]) / lam.sqrt()
-        logp = -0.5 * z**2 - 0.5 * torch.log(self.tensor(2 * torch.pi))
-        if self.bounds is not None:
-            logp = torch.where(z.abs() <= self.truncation + 1e-9,
-                               logp - torch.log(self.bounds[1] - self.bounds[0]), -torch.inf)
-        return logp.sum(1) - 0.5 * torch.log(lam).sum()
+    def form_details(self):
+        return [f"mu and sigma from {self.source}"] + super().form_details()

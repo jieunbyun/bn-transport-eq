@@ -438,18 +438,6 @@ function diagramNavigation(viewport, { get, set, fit, ignoreDrag = () => false, 
    "description": "A measurement of SA(1.0) at one bridge, with error. Observing it conditions the bridge's SA(1.0) softly, where observing SA(1.0) itself would fix it.",
    "type": "g"
   },
-  "GMResidual": {
-   "id": "GMResidual",
-   "label": "Normalised ground-motion residual at one bridge",
-   "kind": "continuous",
-   "unit": "standard deviations",
-   "range": [
-    null,
-    null
-   ],
-   "description": "epsilon in ln IM = ln median + sigma * epsilon. Standard normal at each bridge, correlated between bridges. A node of its own so the spatial dependence is explicit in the BN, where observations could later condition it.",
-   "type": "standard deviations"
-  },
   "DamageState.HazusBridge": {
    "id": "DamageState.HazusBridge",
    "label": "Hazus highway-bridge damage state",
@@ -925,7 +913,7 @@ function diagramNavigation(viewport, { get, set, fit, ignoreDrag = () => false, 
       "EvaluateLikelihood",
       "EvaluateDensity"
      ],
-     "description": "Median ln IM at each bridge from the event's magnitude and the bridge's distance, plus an independent residual per bridge, for whichever GMM the parameter set is. The event is fixed data: the one Event row's mw, lat, lon and depth_km, read like the bridge's own lat/lon, so it is no BN node. An uncertain rupture (e.g. sampled from a source model) would come back as a scenario function feeding an input here. Choose the set with parameter_set_by_location to use the model made for where the network is. Joint: one draw covers every bridge. The Campbell (2003) residuals are independent between bridges, which the result says; correlating them needs the between- and within-event split of sigma.",
+     "description": "ln IM at the bridges as one Gaussian field, ln IM ~ N(mu, D R D) with D = diag(sigma): mu, the median ln IM at each bridge from the event's magnitude and the bridge's distance, and sigma, the GMM's total standard deviation, for whichever GMM the parameter set is. R is the binding's correlation (a spatial-correlation set); without one the bridges are independent, which the result says. The event is fixed data: the one Event row's mw, lat, lon and depth_km, read like the bridge's own lat/lon, so it is no BN node. An uncertain rupture (e.g. sampled from a source model) would come back as a scenario function feeding an input here. Choose the set with parameter_set_by_location to use the model made for where the network is. Joint: one draw covers every bridge. Campbell (2003) gives one total sigma, without the between- and within-event split that correlating it properly needs.",
      "parameter_sets": [
       {
        "id": "campbell-2003.ema-script-sa1",
@@ -943,23 +931,10 @@ function diagramNavigation(viewport, { get, set, fit, ignoreDrag = () => false, 
     {
      "key": "hazard.shakemap",
      "function": "hazard.shakemap",
-     "label": "USGS ShakeMap, one IM at each bridge, from grid.xml and uncertainty.xml",
+     "label": "USGS ShakeMap: ln IM at the bridges as a Gaussian field, from grid.xml and uncertainty.xml",
      "role": "hazard",
      "per": "Bridge",
-     "inputs": [
-      {
-       "name": "epsilon",
-       "quantity": "GMResidual",
-       "over": "Bridge",
-       "via": "self",
-       "description": "This bridge's residual, from a field that carries the correlation between bridges.",
-       "choices": [
-        "GMResidual"
-       ],
-       "template": null,
-       "kind": "self"
-      }
-     ],
+     "inputs": [],
      "outputs": [
       {
        "name": "im",
@@ -978,80 +953,18 @@ function diagramNavigation(viewport, { get, set, fit, ignoreDrag = () => false, 
       "lat",
       "lon"
      ],
-     "tables": [
-      "Bridge"
-     ],
-     "has_parameters": true,
-     "implementation": "src.builder.kernels.hazard:ShakeMap",
-     "deterministic": true,
-     "drawKind": "Marginal",
-     "capabilities": [
-      "SampleForward",
-      "EvaluateLikelihood"
-     ],
-     "description": "ln IM = ln median + sigma * epsilon, with the median from grid.xml (e.g. PSA10 for SA(1.0)) and sigma from uncertainty.xml (STDPSA10), both interpolated bilinearly on the log scale at the site. Deterministic given epsilon: the randomness, and the dependence between sites, live in the residual field. A bridge off the map gets the map's value at its nearest edge, an upper bound (USGS maps reach to where shaking has faded to light), not zero; a map that reaches no bridge is refused; a map without uncertainty.xml gives sigma = 0 and says so.",
-     "parameter_sets": [],
-     "n_parameter_sets": 0
-    },
-    {
-     "key": "hazard.spatial-correlation",
-     "function": "hazard.spatial-correlation",
-     "label": "Spatially correlated ground-motion residual field",
-     "role": "hazard",
-     "per": "Bridge",
-     "inputs": [],
-     "outputs": [
-      {
-       "name": "epsilon",
-       "quantity": "GMResidual",
-       "choices": [
-        "GMResidual"
-       ],
-       "template": null
-      }
-     ],
-     "attributes": [
-      "lat",
-      "lon"
-     ],
      "tables": [],
      "has_parameters": true,
-     "implementation": "src.builder.kernels.hazard:SpatialCorrelationField",
+     "implementation": "src.builder.kernels.hazard:ShakeMap",
      "deterministic": false,
      "drawKind": "Joint",
      "capabilities": [
       "SampleForward",
       "EvaluateLikelihood"
      ],
-     "description": "One joint draw over every Bridge in the binding: epsilon = L z, with L L' = R, R_ij = exp(-3 h_ij / b) and h_ij the great-circle distance in km. L is the symmetric root from an eigendecomposition rather than a Cholesky factor, so bridges at the same location (correlation 1) do not make it fail. Applied to ShakeMap's conditional standard deviations this is OpenQuake's approximation: the correlation is the unconditional model's, not the one conditioned on the stations.",
-     "parameter_sets": [
-      {
-       "id": "jayaram-baker-2009.pga",
-       "label": "Jayaram & Baker (2009) at T = 0.0 s: range b = 8.5 km (no Vs30 clustering)",
-       "count": null
-      },
-      {
-       "id": "jayaram-baker-2009.sa0p3",
-       "label": "Jayaram & Baker (2009) at T = 0.3 s: range b = 13.66 km (no Vs30 clustering)",
-       "count": null
-      },
-      {
-       "id": "jayaram-baker-2009.sa1p0",
-       "label": "Jayaram & Baker (2009) at T = 1.0 s: range b = 25.7 km (no Vs30 clustering)",
-       "count": null
-      },
-      {
-       "id": "jayaram-baker-2009.sa3p0",
-       "label": "Jayaram & Baker (2009) at T = 3.0 s: range b = 33.1 km (no Vs30 clustering)",
-       "count": null
-      },
-      {
-       "id": "independent.any-im",
-       "label": "Independent bridges (no spatial correlation)",
-       "count": null
-      }
-     ],
-     "n_parameter_sets": 5
+     "description": "ln IM at the bridges as one Gaussian field, ln IM ~ N(mu, D R D) with D = diag(sigma): mu from grid.xml (e.g. PSA10 for SA(1.0)) and sigma from uncertainty.xml (STDPSA10), both interpolated bilinearly on the log scale at each bridge. R is the binding's correlation (a spatial-correlation set); without one the bridges are independent. A bridge off the map gets the map's value at its nearest edge, an upper bound (USGS maps reach to where shaking has faded to light), not zero; a map that reaches no bridge is refused; a map without uncertainty.xml gives sigma = 0 and says so. The map is already conditioned on its seismic stations: a station's reading entered again as SAObs counts twice.",
+     "parameter_sets": [],
+     "n_parameter_sets": 0
     },
     {
      "key": "observation.intensity",
@@ -1181,16 +1094,6 @@ function diagramNavigation(viewport, { get, set, fit, ignoreDrag = () => false, 
      "to": "fragility.bridge",
      "in": "im",
      "quantity": "{imt}",
-     "via": "self",
-     "kind": "self",
-     "parents": null
-    },
-    {
-     "from": "hazard.spatial-correlation",
-     "out": "epsilon",
-     "to": "hazard.shakemap",
-     "in": "epsilon",
-     "quantity": "GMResidual",
      "via": "self",
      "kind": "self",
      "parents": null

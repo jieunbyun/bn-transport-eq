@@ -94,7 +94,7 @@ def test_every_object_is_a_tbnpy_probability_that_reads_as_its_distribution(mode
                                            "[policy.closed-at-extensive])")
     assert "object at 0x" not in repr(probs)
     assert "rules: " in str(probs["SystemState::n4"])
-    assert "note: hazard.gmm draws each Bridge's residual independently" in str(probs["hazard.gmm"])
+    assert "note: hazard.gmm draws each Bridge's ln IM independently" in str(probs["hazard.gmm"])
     assert tbnpy.check_model(probs, n_sample=64).ok
 
 

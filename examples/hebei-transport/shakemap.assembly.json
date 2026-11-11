@@ -3,13 +3,8 @@
   "id": "hebei-transport/shakemap",
   "label": "Hebei transport: the 1966 Xingtai earthquake (M6.8) from USGS ShakeMap",
   "network": "hebei-transport",
-  "description": "The 1966 Xingtai earthquake's USGS ShakeMap: its median and uncertainty at each bridge, with residuals correlated between bridges (Jayaram & Baker 2009, as OpenQuake applies to ShakeMaps). Sampling fetches the map (about 30 MB) unless it is cached.",
+  "description": "The 1966 Xingtai earthquake's USGS ShakeMap: its median and uncertainty at each bridge, with ln SA correlated between bridges (Jayaram & Baker 2009, as OpenQuake applies to ShakeMaps). Sampling fetches the map (about 30 MB) unless it is cached.",
   "bindings": [
-    {
-      "function": "hazard.spatial-correlation",
-      "parameter_set": "jayaram-baker-2009.sa1p0",
-      "note": "Its period matches the IM below. Swap for independent.any-im to see what the correlation changes."
-    },
     {
       "function": "hazard.shakemap",
       "parameters": {
@@ -17,7 +12,9 @@
         "imt": "SA(1.0)",
         "version": null,
         "source": null
-      }
+      },
+      "correlation": "jayaram-baker-2009.sa1p0",
+      "note": "ln SA at the bridges is one Gaussian field: the map's median and sigma at each bridge, correlated by this set (its period matches the IM). Swap for independent.any-im to see what the correlation changes."
     },
     {
       "function": "observation.intensity",

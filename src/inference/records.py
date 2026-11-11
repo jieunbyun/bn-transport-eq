@@ -142,7 +142,8 @@ def log_query(result: dict[str, Any], compiled: Any, bindings: set[int], bank: M
         "provenance": {
             "model_sha256": _tbn_fingerprint({**tbn_data(compiled, bindings),
                               **({"node_interventions": result["query"]["do"]} if result["query"].get("do") else {})}),
-            "parameter_sets": {b.function["id"]: dict(Counter(s for s in b.parameter_sets if s)) or None for b in used},
+            "parameter_sets": {**{b.function["id"]: dict(Counter(s for s in b.parameter_sets if s)) or None for b in used},
+                               **{b.function["correlation_model"]: b.correlation for b in used if b.correlation}},
             "code": _code(), "versions": _versions(),
         },
         "samples_file": stored,

@@ -68,17 +68,6 @@
       "description": "A measurement of SA(1.0) at one bridge, with error. Observing it conditions the bridge's SA(1.0) softly, where observing SA(1.0) itself would fix it."
     },
     {
-      "id": "GMResidual",
-      "label": "Normalised ground-motion residual at one bridge",
-      "kind": "continuous",
-      "unit": "standard deviations",
-      "range": [
-        null,
-        null
-      ],
-      "description": "epsilon in ln IM = ln median + sigma * epsilon. Standard normal at each bridge, correlated between bridges. A node of its own so the spatial dependence is explicit in the BN, where observations could later condition it."
-    },
-    {
       "id": "DamageState.HazusBridge",
       "label": "Hazus highway-bridge damage state",
       "kind": "discrete",

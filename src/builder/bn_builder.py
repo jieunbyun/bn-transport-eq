@@ -51,6 +51,7 @@ class Binding:
     quantities: list[dict[str, str]]         # per row, port name -> quantity, "{imt}" resolved
     parents: dict[str, list[list[str]]]      # input name -> per row, the parent row ids
     upstream: set[int]
+    correlation: str | None = None           # the correlation_model's set correlating the rows; None: independent
 
     @property
     def label(self) -> str:
@@ -124,6 +125,7 @@ class Compiled:
                 "rows": len(b.rows),
                 "nodes": len(b.rows) * len(b.function["outputs"]),
                 "parameter_sets": dict(Counter(s for s in b.parameter_sets if s)),
+                "correlation": b.correlation,
                 "inline_parameters": b.spec.get("parameters"),
                 "inputs": inputs,
                 "upstream": sorted(b.upstream),
@@ -254,6 +256,16 @@ def compile_assembly(assembly: dict[str, Any], lib: Library, network: Network) -
         else:
             problems.append(f"{where_label}: {fn['id']} needs parameter_set, parameter_set_by_location or parameters")
 
+        correlation = spec.get("correlation")
+        if correlation is not None:
+            model = fn.get("correlation_model")
+            found = lib.parameter_sets.get(correlation)
+            if model is None:
+                problems.append(f"{where_label}: {fn['id']} has no correlation between its rows to set")
+            elif found is None or found.get("model") != model:
+                sets = sorted(s for s, p in lib.parameter_sets.items() if p.get("model") == model)
+                problems.append(f"{where_label}: no {model} set {correlation!r}; have {', '.join(sets)}")
+
         quantities = [resolve_quantities(fn, v) for v in values]
         for port in fn["outputs"]:
             for row, q in zip(rows, quantities):
@@ -267,7 +279,7 @@ def compile_assembly(assembly: dict[str, Any], lib: Library, network: Network) -
                 else:
                     producer[key] = index
 
-        bindings.append(Binding(index, spec, fn, rows, sets, values, quantities, {}, set()))
+        bindings.append(Binding(index, spec, fn, rows, sets, values, quantities, {}, set(), correlation))
 
     # Pass 2: parents, now that every producer is known.
     for b in bindings:
@@ -359,19 +371,11 @@ def _gmm_arguments(rows, params, tables, parent_rows, states):
                                 "sites": _sites(rows)}
 
 
-def _correlation_arguments(rows, params, tables, parent_rows, states):
-    """SpatialCorrelationField: the correlation model from its parameter set; the sites its own."""
-    return {"correlation": params[0]}, {"sites": _sites(rows)}
-
-
 def _shakemap_arguments(rows, params, tables, parent_rows, states):
-    """ShakeMap: which map, from its parameter set, with every bridge on it (to refuse a map that reaches
-    none); the site its own."""
-    (row,), (p,) = rows, params
-    sites = [[r["lat"], r["lon"]] for r in tables.get("Bridge", []) if r.get("lat") is not None]
-    return ({"event_id": p["event_id"], "imt": p["imt"], "source": p.get("source"), "version": p.get("version"),
-             "sites": sites or None},
-            {"lat": row["lat"], "lon": row["lon"]})
+    """ShakeMap: which map, from its parameters; the sites its own."""
+    p = params[0]
+    return ({"event_id": p["event_id"], "imt": p["imt"], "source": p.get("source"), "version": p.get("version")},
+            {"sites": _sites(rows)})
 
 
 def _observation_arguments(rows, params, tables, parent_rows, states):
@@ -411,7 +415,6 @@ def _system_arguments(rows, params, tables, parent_rows, states):
 # parameter_sets, under the set's id, and every node on that set names it.
 KERNEL_ARGUMENTS = {
     "src.builder.kernels.hazard:Gmm": _gmm_arguments,
-    "src.builder.kernels.hazard:SpatialCorrelationField": _correlation_arguments,
     "src.builder.kernels.hazard:ShakeMap": _shakemap_arguments,
     "src.builder.kernels.observation:ObservedIntensity": _observation_arguments,
     "src.builder.kernels.fragility:Fragility": _fragility_arguments,
@@ -500,6 +503,8 @@ def tbn_data(compiled: Compiled, bindings: set[int] | None = None) -> dict[str, 
             rows, params = [b.rows[r] for r in group], [b.parameters[r] for r in group]
             parent_rows = {port: [b.parents[port][r] for r in group] for port in b.parents}
             shared, own = arguments(rows, params, tables, parent_rows, states)
+            if b.correlation:                       # the binding's correlation between the object's rows
+                own = {**own, "correlation": {"id": b.correlation, **lib.parameter_sets[b.correlation]["values"]}}
             node = {"name": key, "type": "custom", "module": module, "cls": cls,
                     "childs": childs, "parents": parents}
             # One parameter set per object: a joint object is grouped by set, any other has one row.
@@ -526,7 +531,7 @@ def tbn_data(compiled: Compiled, bindings: set[int] | None = None) -> dict[str, 
         "instance_sources": {
             s: {"file": lib.parameter_sets[s]["file"], "source": lib.parameter_sets[s]["source"]}
             for i, b in enumerate(compiled.bindings) if bindings is None or i in bindings
-            for s in b.parameter_sets if s
+            for s in [*b.parameter_sets, b.correlation] if s
         },
         "variables": list(variables.values()), "parameter_sets": parameter_sets, "nodes": nodes,
     }

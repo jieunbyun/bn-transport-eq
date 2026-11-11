@@ -2,7 +2,7 @@
   "$schema": "../meta/function.schema.json",
   "id": "hazard.gmm",
   "label": "Ground-motion model",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "role": "hazard",
   "per": "Bridge",
   "inputs": [],
@@ -141,6 +141,7 @@
       }
     ]
   },
+  "correlation_model": "spatial-correlation",
   "implementation": "src.builder.kernels.hazard:Gmm",
   "deterministic": false,
   "drawKind": "Joint",
@@ -152,5 +153,5 @@
   "source": {
     "note": "Each parameter set cites its own model. The kernel holds the functional forms."
   },
-  "description": "Median ln IM at each bridge from the event's magnitude and the bridge's distance, plus an independent residual per bridge, for whichever GMM the parameter set is. The event is fixed data: the one Event row's mw, lat, lon and depth_km, read like the bridge's own lat/lon, so it is no BN node. An uncertain rupture (e.g. sampled from a source model) would come back as a scenario function feeding an input here. Choose the set with parameter_set_by_location to use the model made for where the network is. Joint: one draw covers every bridge. The Campbell (2003) residuals are independent between bridges, which the result says; correlating them needs the between- and within-event split of sigma."
+  "description": "ln IM at the bridges as one Gaussian field, ln IM ~ N(mu, D R D) with D = diag(sigma): mu, the median ln IM at each bridge from the event's magnitude and the bridge's distance, and sigma, the GMM's total standard deviation, for whichever GMM the parameter set is. R is the binding's correlation (a spatial-correlation set); without one the bridges are independent, which the result says. The event is fixed data: the one Event row's mw, lat, lon and depth_km, read like the bridge's own lat/lon, so it is no BN node. An uncertain rupture (e.g. sampled from a source model) would come back as a scenario function feeding an input here. Choose the set with parameter_set_by_location to use the model made for where the network is. Joint: one draw covers every bridge. Campbell (2003) gives one total sigma, without the between- and within-event split that correlating it properly needs."
 }
