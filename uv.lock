@@ -105,7 +105,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pip", specifier = ">=26.2.1" },
     { name = "pytest", specifier = ">=9.1.1" },
-    { name = "rsr-duco", specifier = ">=0.2.0" },
+    { name = "rsr-duco", specifier = ">=0.3.1" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "tbnpy", specifier = ">=0.3.5" },
     { name = "torch", specifier = ">=2.0" },
@@ -2053,7 +2053,7 @@ wheels = [
 
 [[package]]
 name = "rsr-duco"
-version = "0.2.0"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
@@ -2069,9 +2069,9 @@ dependencies = [
     { name = "torch" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/ef/4386549506fa118493fe6d4f266e4ea0f0a37c6bb58d3050b5d8276f7dda/rsr_duco-0.2.0.tar.gz", hash = "sha256:8930c6cdde1af364adca9a32ad0984b712e19822b1ff0eec23962154a16354d2", size = 51888, upload-time = "2026-08-19T12:01:10.436Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/f4/97f2cfc25d47a8392efbe18f61537e344adcb3af71331667a15ab3fd01b7/rsr_duco-0.3.1.tar.gz", hash = "sha256:53608d0922a158712d13ffb331efbba96e9a54af540126777eb92647b8bb689d", size = 78368, upload-time = "2026-11-11T16:05:13.864Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/02/acbf9aa1bc0048280bfe1d12cd82839180679b4bf76f20d43f12b02578be/rsr_duco-0.2.0-py3-none-any.whl", hash = "sha256:fa0fa0d8c861edc8de0fe23da74e6c66d0725b1ebb54840e651f7db7824a80be", size = 35778, upload-time = "2026-08-19T12:01:09.169Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/e9/3abc495897fd48b474e1c26fe26d6a1e2a658df1427220a9c08d71604ff2/rsr_duco-0.3.1-py3-none-any.whl", hash = "sha256:4bf5d0c027871f70fa03f60435eac7d359d9258f90a3f65d1d53c1071c571d63", size = 51329, upload-time = "2026-11-11T16:05:12.581Z" },
 ]
 
 [[package]]
