@@ -47,7 +47,7 @@ import time
 import torch
 from src.cancellation import check_cancelled
 
-from src.builder.kernels.hazard import ShakeMap, SpatialCorrelationField
+from src.builder.kernels.hazard import GaussianField
 from src.builder.kernels.observation import ObservedIntensity
 
 # ---- what each message delivers, for the app ----------------------------------------------------------
@@ -104,27 +104,19 @@ def describe():
 def tree(probs, corr=None):
     """The pieces each clique needs, from tbnpy's probability objects (define_model()[1]).
     The edges follow the system kernels' edge order, which every E vector uses.
-    The hazard is either hazard.gmm (ln SA = ln_median + sigma eps, eps independent between sites) or
-    a ShakeMap per site with one spatial-correlation field (ln SA = the map's ln_median + its sigma
-    eps, eps correlated; its truncation at a few standard deviations is not kept here).
-    corr: the correlation (n_sites, n_sites) of the ln SA residuals, in the hazard's site order, to use
-    instead of the model's; None for the model's own (independent sites under hazard.gmm)."""
-    eps = None
-    if "hazard.gmm" in probs:
-        gmm = probs["hazard.gmm"]
-        sites, ln_median, sigma = [v.name for v in gmm.childs], gmm.ln_median, gmm.sigma
-    else:
-        fields = [p for p in probs.values() if isinstance(p, SpatialCorrelationField)]
-        maps = {p.parents[0].name: p for p in probs.values() if isinstance(p, ShakeMap)}
-        if len(fields) != 1 or not maps:
-            raise ValueError("the clique tree needs hazard.gmm, or ShakeMaps with one spatial-correlation field")
-        order = [v.name for v in fields[0].childs]                          # eps, one per site
-        sites = [maps[e].childs[0].name for e in order]
-        ln_median = torch.tensor([maps[e].ln_median for e in order], dtype=torch.float64)
-        sigma = torch.tensor([maps[e].sigma for e in order], dtype=torch.float64)
-        if corr is None:
-            corr = (fields[0].vectors * fields[0].values) @ fields[0].vectors.T
-        eps = list(zip(order, sites))
+    The hazard is a Gaussian field of ln SA (kernels.hazard.GaussianField: a GMM or a ShakeMap),
+    ln SA ~ N(ln_median, D R D) with D = diag(sigma), or several over disjoint sites (e.g. one GMM
+    per region), independent of each other.
+    corr: the correlation R (n_sites, n_sites) of ln SA, in the hazard's site order, to use instead of
+    the model's; None for the model's own."""
+    fields = [p for p in probs.values() if isinstance(p, GaussianField)]
+    if not fields:
+        raise ValueError("the clique tree needs a hazard field of SA (hazard.gmm or hazard.shakemap)")
+    sites = [v.name for p in fields for v in p.childs]
+    ln_median = torch.cat([p.ln_median for p in fields])
+    sigma = torch.cat([p.sigma for p in fields])
+    if corr is None:
+        corr = torch.block_diag(*[p.corr for p in fields])
     systems = {k.split("::")[1]: p for k, p in probs.items() if k.startswith("SystemState::")}
     observed = {p.parents[0].name: p for p in probs.values() if isinstance(p, ObservedIntensity)}
     edges = []
@@ -138,7 +130,7 @@ def tree(probs, corr=None):
                       "site": sites.index(frag.parents[0].name), "frag": frag,
                       "to_e": torch.nn.functional.one_hot(edge.open_if.long(), 2).double()})   # (K, 2)
     return {"edges": edges, "ln_median": ln_median, "sigma": sigma, "corr": corr, "systems": systems,
-            "sites": sites, "eps": eps}
+            "sites": sites}
 
 
 def field(t):
@@ -172,7 +164,7 @@ def intervene(t, do):
     set keeps it whatever SA, and its edge follows it. SA cannot be set: it is observed only through
     SAObs, and set here it would cut the field. System states and SAObs set are written into the
     rows by sample()."""
-    if any(c["SA"] in do for c in t["edges"]) or any(e in do for e, _ in t.get("eps") or []):
+    if any(c["SA"] in do for c in t["edges"]):
         raise ValueError("SA cannot be set by do")
     edges = []
     for c in t["edges"]:
@@ -433,8 +425,9 @@ def sample(t, ev, n_chain=100, n_burn=200, n_keep=10_000, bridge=8, seed=0, sa0=
     root_absorb and sa_e_down (see the module's docstring), each kept sweep then passed on down; row r
     from chain r % n_chain. The chains start from SA drawn from field(), or from sa0 (n_chain, n) in edge
     order if given; and E from e0 (n_chain, n) where it lies in a box of every observed system's
-    certificates, else at a corner of the boxes. Returns rows {variable: (N,)} (with a ShakeMap hazard,
-    its residuals eps as well) and cost {step: {"sec", "n_ops"}}, summed over the cliques of each kind."""
+    certificates, else from rsr.mcmc's sequential draw (mcmc.start). bridge: the partner tuples of the
+    tuple jump that ends each step at the root (None or 0 for none). Returns rows {variable: (N,)} and
+    cost {step: {"sec", "n_ops"}}, summed over the cliques of each kind."""
     check_cancelled()
     if direct := [c["SA"] for c in t["edges"] if c["SA"] in ev]:
         raise ValueError(f"SA is observed only through SAObs, not directly: {direct}")
@@ -497,10 +490,5 @@ def sample(t, ev, n_chain=100, n_burn=200, n_keep=10_000, bridge=8, seed=0, sa0=
             rows[name] = torch.full((len(e),), int(x))
         elif name in rows and name.startswith("SAObs"):
             rows[name] = torch.full_like(rows[name], x)
-    if t.get("eps"):                                # a ShakeMap's residual at each site, from its SA
-        index = {name: i for i, name in enumerate(t["sites"])}
-        for e_name, site in t["eps"]:
-            if site in rows:
-                rows[e_name] = (rows[site].log() - t["ln_median"][index[site]]) / t["sigma"][index[site]]
     check_cancelled()
     return rows, cost

@@ -488,7 +488,8 @@ def tool_spec(menu: Mapping[str, Any]) -> dict[str, Any]:
             "do": {**obj, "description": "Force exact discrete node names to states before descendants draw."},
             "rows": {**obj, "description": 'Set row attributes: {"<row id>": {"<attribute>": value}}.'},
             "parameters": {**obj, "description": 'Set inline parameters: {"<function id>": {"<name>": value}}.'},
-            "parameter_sets": {**obj, "description": 'Swap parameter sets: {"<function id>": "<set id>"}.'},
+            "parameter_sets": {**obj, "description": 'Swap parameter sets: {"<function id>": "<set id>"}, or the '
+                               'hazard field\'s correlation: {"spatial-correlation": "<set id>"}.'},
             "evidence": {**obj, "description": "Observed discrete node states. Rejection conditioning."},
             "analysis": {**SCHEMA, "description": "Deterministic comparisons, bridge importance, paths or VOI."},
             "clarification": {**CLARIFICATION_SCHEMA, "description": "Ask for missing meaning/inputs; choices can explain mathematical definitions. Wait for the user's reply."},

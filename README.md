@@ -59,8 +59,8 @@ decision tasks and evidence, reading results, and customising `network.json`.
 
 `toy-ca/shakemap` and `ema-highway/shakemap` take their ground motion from a real
 earthquake's USGS ShakeMap instead of a scenario and a ground-motion model: each
-bridge gets the map's median SA(1.0 s) and its uncertainty, with residuals
-correlated between bridges. They open on the 1989 Loma Prieta earthquake (M6.9) and
+bridge gets the map's median SA(1.0 s) and its uncertainty, ln SA being one Gaussian
+field correlated between bridges. They open on the 1989 Loma Prieta earthquake (M6.9) and
 the 2020 Buzzards Bay earthquake (M3.6), the one recorded map that covers every EMA
 bridge. A map that misses a bridge is refused, not read as zero shaking.
 

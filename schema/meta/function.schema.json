@@ -83,6 +83,10 @@
       "description": "JSON Schema every instance of this function must satisfy: each parameter set's `values` under instances/<role>/, and the inline `parameters` of an assembly binding. Omit for a function with no parameters.",
       "type": "object"
     },
+    "correlation_model": {
+      "description": "A model under schema/models/ whose parameter sets give the correlation between this joint function's rows. A binding names one with `correlation`; without it the rows are independent.",
+      "type": "string"
+    },
     "implementation": {
       "description": "\"python.module:Class\": a tbnpy probability class, built for one binding by Class.from_spec(childs, parents, spec), whose childs are all its rows' outputs. See src/builder/kernels/__init__.py.",
       "type": "string",

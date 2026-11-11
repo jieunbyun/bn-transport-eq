@@ -15,7 +15,7 @@ from tbnpy.variable import Variable
 
 from src.builder.bn_builder import compile_assembly, compile_path
 from src.builder.kernels.fragility import Fragility
-from src.builder.kernels.hazard import (ShakeMap, SpatialCorrelationField, campbell_2003_ln_median,
+from src.builder.kernels.hazard import (GaussianField, ShakeMap, campbell_2003_ln_median,
                                         great_circle_km, jayaram_baker_2009_range_km)
 from src.builder.kernels.edge import EdgeOpen
 from src.builder.kernels.system import TravelTimeToNearest
@@ -375,7 +375,7 @@ def test_every_system_node_reads_every_edge(lib):
     assert len(nodes[f"SystemState::{origins[0]}"]["parents"]) == 129
 
 
-def test_shakemap_kernel_samples_and_bounds_a_site_off_the_map_by_its_edge(monkeypatch):
+def test_shakemap_kernel_is_a_field_of_the_maps_median_and_sigma_and_bounds_a_site_off_it_by_its_edge(monkeypatch):
     from src.builder import shakemap
 
     grid = shakemap.ShakeMapGrid(
@@ -384,25 +384,31 @@ def test_shakemap_kernel_samples_and_bounds_a_site_off_the_map_by_its_edge(monke
     )
     monkeypatch.setattr(shakemap, "load", lambda *a, **k: grid)
 
-    def shakemap_at(lat, lon, sites=None):
-        return ShakeMap([Variable("SA(1.0)::x", (0.0, inf))], [Variable("GMResidual::x", (-inf, inf))],
-                        event_id="test", imt="SA(1.0)", lat=lat, lon=lon, sites=sites)
+    def shakemap_at(sites, correlation=None):
+        rows = [{"id": f"s{i}", "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(sites)]
+        return ShakeMap([Variable(f"SA(1.0)::{r['id']}", (0.0, inf)) for r in rows], [],
+                        event_id="test", imt="SA(1.0)", sites=rows, correlation=correlation)
 
-    prob = shakemap_at(0.5, 0.5)
-    epsilon = torch.tensor([[-1.0], [0.0], [2.0]], dtype=torch.float64)
-    sa = prob.evaluate(epsilon)[:, 0]
-    assert np.allclose(np.log(sa.numpy()), log(0.4) + 0.5 * epsilon[:, 0].numpy())     # deterministic given the residual
+    prob = shakemap_at([(0.5, 0.5), (0.2, 0.7)])
+    assert torch.allclose(prob.ln_median, torch.tensor(log(0.4), dtype=torch.float64))
+    assert torch.allclose(prob.sigma, torch.tensor(0.5, dtype=torch.float64))
+    torch.manual_seed(3)
+    sa, logp = prob.sample(n_sample=40000)
+    ln_sa = sa.log().numpy()
+    assert np.allclose(ln_sa.mean(axis=0), log(0.4), atol=0.01) and np.allclose(ln_sa.std(axis=0), 0.5, atol=0.01)
+    assert abs(np.corrcoef(ln_sa.T)[0, 1]) < 0.03                         # no correlation named: independent
     assert any("no seismic station" in w for w in prob.notes)
 
     # Off the map (it spans 0-1 degrees), with another site on it: the value at the nearest edge point, (1, 1).
     from dataclasses import replace
     corner = replace(grid, ln_im=np.array([[log(0.4), log(0.3)], [log(0.4), log(0.4)]]))   # row 0 is lat 1: (1, 1) is 0.3 g
     monkeypatch.setattr(shakemap, "load", lambda *a, **k: corner)
-    off = shakemap_at(1.5, 1.5, sites=[[0.5, 0.5], [1.5, 1.5]])
-    assert np.isclose(off.ln_median, log(0.3)) and np.isclose(off.sigma, 0.5) and 70 < off.outside_km < 80
-    assert any("79 km off ShakeMap test v1" in w and "upper bound" in w for w in off.notes)
+    off = shakemap_at([(0.5, 0.5), (1.5, 1.5)])
+    assert np.isclose(off.ln_median[1], log(0.3)) and np.isclose(off.sigma[1], 0.5)
+    assert off.outside_km[0] == 0 and 70 < off.outside_km[1] < 80
+    assert any("1 of 2 sites lie off ShakeMap test v1 (up to 79 km" in w and "upper bound" in w for w in off.notes)
     with pytest.raises(ValueError, match="reaches none of the 1 sites"):
-        shakemap_at(5.0, 5.0, sites=[[5.0, 5.0]])
+        shakemap_at([(5.0, 5.0)])
 
 
 @pytest.mark.parametrize("period, clustered, expected", [
@@ -413,38 +419,54 @@ def test_jayaram_baker_ranges(period, clustered, expected):
     assert jayaram_baker_2009_range_km(period, clustered) == pytest.approx(expected)
 
 
-def _field(lib, set_id, rows, n=40000, truncation=None):
-    correlation = {**lib.parameter_sets[set_id]["values"], "truncation_level": truncation}
-    prob = SpatialCorrelationField([Variable(f"GMResidual::{r['id']}", (-inf, inf)) for r in rows], [],
-                                   sites=rows, correlation=correlation)
+def _field(lib, set_id, rows, ln_median=log(0.2), sigma=0.6):
+    """A Gaussian field of ln SA at the rows, correlated by the set."""
+    prob = GaussianField([Variable(f"SA(1.0)::{r['id']}", (0.0, inf)) for r in rows])
+    n = len(rows)
+    prob._field(rows, torch.full((n,), ln_median, dtype=torch.float64), torch.full((n,), sigma, dtype=torch.float64),
+                {"id": set_id, **lib.parameter_sets[set_id]["values"]})
+    return prob
+
+
+def _draw(prob, n=40000):
     torch.manual_seed(7)
-    eps, logp = prob.sample(n_sample=n)
-    torch.testing.assert_close(logp, prob.log_prob(eps))               # sample and likelihood agree
-    return prob, eps.numpy()
+    sa, logp = prob.sample(n_sample=n)
+    torch.testing.assert_close(logp, prob.log_prob(sa))                 # sample and likelihood agree
+    return np.log(sa.numpy())
 
 
 def test_the_field_reproduces_the_correlation_model(lib):
     # 0.08993 deg of latitude is 10.0 km; the third site sits on the first.
     rows = [{"id": "a", "lat": 0.0, "lon": 0.0}, {"id": "b", "lat": 0.08993, "lon": 0.0},
             {"id": "c", "lat": 0.0, "lon": 0.0}]
-    prob, eps = _field(lib, "jayaram-baker-2009.sa1p0", rows)
-    r = np.corrcoef(eps.T)
-    assert np.allclose(eps.std(axis=0), 1.0, atol=0.02)
+    prob = _field(lib, "jayaram-baker-2009.sa1p0", rows)
+    ln_sa = _draw(prob)
+    r = np.corrcoef(ln_sa.T)
+    assert np.allclose(ln_sa.mean(axis=0), log(0.2), atol=0.01) and np.allclose(ln_sa.std(axis=0), 0.6, atol=0.01)
     assert r[0, 1] == pytest.approx(np.exp(-3 * 10.0 / 25.7), abs=0.02)
     assert r[0, 2] == pytest.approx(1.0, abs=1e-6)                     # co-located: no failure, fully correlated
     assert not prob.notes
 
 
+def test_the_fields_density_is_the_lognormal_one(lib):
+    # Two distinct sites: ln SA ~ N(mu, D R D), so the density of SA is the bivariate normal's of ln SA over SA_1 SA_2.
+    rows = [{"id": "a", "lat": 0.0, "lon": 0.0}, {"id": "b", "lat": 0.08993, "lon": 0.0}]
+    prob = _field(lib, "jayaram-baker-2009.sa1p0", rows)
+    sa = torch.tensor([[0.1, 0.3], [0.2, 0.2], [1.0, 0.05]], dtype=torch.float64)
+    rho = torch.exp(-3 * great_circle_km(0.0, 0.0, 0.08993, 0.0) / 25.7).item()
+    cov = 0.36 * torch.tensor([[1.0, rho], [rho, 1.0]], dtype=torch.float64)
+    mvn = torch.distributions.MultivariateNormal(torch.full((2,), log(0.2), dtype=torch.float64), cov)
+    torch.testing.assert_close(prob.log_prob(sa), mvn.log_prob(sa.log()) - sa.log().sum(1))
+    assert prob.log_prob(torch.tensor([[0.0, 0.1]], dtype=torch.float64)).item() == -inf
+
+
 def test_independent_sites_are_uncorrelated_and_say_so(lib):
     rows = [{"id": "a", "lat": 0.0, "lon": 0.0}, {"id": "b", "lat": 0.0, "lon": 0.0}]
-    prob, eps = _field(lib, "independent.any-im", rows)
-    assert abs(np.corrcoef(eps.T)[0, 1]) < 0.03
+    prob = _field(lib, "independent.any-im", rows)
+    assert abs(np.corrcoef(_draw(prob).T)[0, 1]) < 0.03
     assert "independently" in prob.notes[0]
-
-
-def test_truncation_bounds_the_independent_normals(lib):
-    _, eps = _field(lib, "independent.any-im", [{"id": "a", "lat": 0.0, "lon": 0.0}], truncation=2.0)
-    assert np.abs(eps).max() <= 2.0 and eps.std() < 0.9                # truncated at 2 sd: variance ~0.77
+    sa = torch.tensor([[0.1, 0.3]], dtype=torch.float64)                # the product of the two lognormals
+    torch.testing.assert_close(prob.log_prob(sa), prob.distribution(1).log_prob(sa).sum(1))
 
 
 # ---- the system event ---------------------------------------------------------------

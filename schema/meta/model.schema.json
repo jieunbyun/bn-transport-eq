@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "model.schema.json",
+  "title": "Model",
+  "description": "A part of a function that is chosen separately from the function's own parameters, with parameter sets of its own under instances/<role>/: e.g. the spatial correlation of a hazard field, which a function names as its `correlation_model` and a binding chooses with `correlation`. A model makes no BN node.",
+  "type": "object",
+  "required": [
+    "id",
+    "label",
+    "role",
+    "instance_schema"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "label": {
+      "type": "string"
+    },
+    "role": {
+      "description": "The role of the functions that use it; its parameter sets are filed under instances/<role>/.",
+      "type": "string"
+    },
+    "instance_schema": {
+      "description": "JSON Schema every parameter set of this model must satisfy.",
+      "type": "object"
+    },
+    "source": {
+      "type": "object"
+    },
+    "description": {
+      "type": "string"
+    }
+  }
+}

@@ -463,3 +463,18 @@ def test_a_browser_that_leaves_mid_reply_is_not_reported_as_a_server_fault(capsy
     except RuntimeError:
         server.handle_error(None, ("127.0.0.1", 1))
     assert "a real fault" in capsys.readouterr().err
+
+
+def test_a_new_session_archives_the_old_one_and_computes_nothing(base_url, tmp_path):
+    from src.app import server
+
+    status, body = post(base_url + "/api/session", {"assembly": "toy-ca/demo", "samples": 1000})
+    assert status == 200 and server._session_path("toy-ca/demo").is_file()
+    status, body = post(base_url + "/api/session/new", {"assembly": "toy-ca/demo"})
+    assert status == 200 and body == {"session": None}
+    assert not server._session_path("toy-ca/demo").is_file() and "toy-ca/demo" not in server._sessions
+    assert len(list((server.SESSIONS / "archive").glob("toy-ca__demo__*.pt"))) == 1      # kept, not deleted
+    _, saved = get(base_url + "/api/session?assembly=toy-ca/demo")
+    assert json.loads(saved)["session"] is None                                           # as on first opening
+    status, body = post(base_url + "/api/session/new", {"assembly": "nowhere/x"})
+    assert status == 400 and "nowhere/x" in body["error"]

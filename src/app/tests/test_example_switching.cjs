@@ -37,7 +37,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 const toy = "toy-ca/demo", ema = "ema-highway/gmm";
 
-function session(id, completed = true) {
+function session(id, completed = true, tracked = true) {
   const name = id === toy ? "Inspection priority for towns' access" : "Inspection priority for people's access";
   const query = {id: "q1", name, target: {kind: "cut_off"}, decision: "inspect"};
   const timeline = [{kind: "start", at: "12:00:00", values: {}, elapsed_s: 0.5}];
@@ -48,12 +48,12 @@ function session(id, completed = true) {
   for (const edge of id === toy ? ["e6", "e9"] : ["e0124", "e0125"])
     variables[`EdgeOpen::${edge}`] = {kind: "edge", states: ["closed", "open"]};
   variables[`SystemState::${id === toy ? "n4" : "n62"}`] = {kind: "system", states: ["Fail", "Survival"]};
-  if (completed) {
-    timeline.push({kind: "query", at: "12:00:01", query, values: {q1: {}}});
+  // Every session tracks a decision task (the page forces the default one); tracked = false is a session saved without.
+  if (tracked) timeline.push({kind: "query", at: "12:00:01", query, values: {q1: {}}});
+  if (completed)
     timeline.push({kind: "evidence", at: "12:00:02", evidence: {variable: reading}, update: "reweighted", values: {q1: {}}});
-  }
   return {n: id === toy ? 10000 : 20000, ess: 1, unit: id === toy ? "towns" : "people",
-    queries: completed ? [query] : [], evidence: completed ? {[reading]: {value: 0.6}} : {}, variables, timeline,
+    queries: tracked ? [query] : [], evidence: completed ? {[reading]: {value: 0.6}} : {}, variables, timeline,
     scenario: {rows: {[id]: {mw: id === toy ? 6 : 7}}}, result: {marker: id, elapsed_s: 0.5}};
 }
 
@@ -89,6 +89,7 @@ function harness(sessions = {[toy]: session(toy), [ema]: session(ema)}, storage 
     document: {createElement: tag => new Element(tag), querySelectorAll: selector =>
       selector === "[data-observation-mode]" ? modes : controls},
     setTimeout: cb => queueMicrotask(cb),
+    setInterval: () => 0, clearInterval() {},          // progress polling: no server to ask here
     getJSON: async url => {
       const parsed = new URL(url, "http://localhost"), id = parsed.searchParams.get("assembly");
       return parsed.pathname === "/api/example" ? {assembly: {id}} : {session: clone(sessions[id] || null)};
@@ -148,9 +149,10 @@ async function check() {
   await reopened.ctx.load(toy);
   assert.equal(reopened.nodes["#e-talk"].textContent, toyChat);
 
-  // Changing the task does not require a language model and cannot add it twice.
+  // Opening a session computes nothing, even one without a decision task. A click on the task computes it on the
+  // open session, without a language model, and a second click cannot add it twice.
   for (const id of [toy, ema]) {
-    const data = {[id]: session(id, false)}, full = harness(data);
+    const data = {[id]: session(id, false, false)}, full = harness(data);
     full.ctx.post = async (url, body) => {
       full.calls.push({url, body: clone(body)});
       const s = data[id];
@@ -165,6 +167,8 @@ async function check() {
       return clone(s);
     };
     await full.ctx.load(id);
+    await tick();
+    assert.equal(full.calls.length, 0);                   // nothing computed on opening
     await full.ctx.selectDecisionTask("inspection-access");
     await full.ctx.selectDecisionTask("inspection-access");
     assert.equal(full.calls.length, 1);
@@ -174,6 +178,22 @@ async function check() {
     assert.equal(full.calls[0].body.query.target.kind, "cut_off");
     assert.equal(full.calls[0].body.query.decision, "inspect");
   }
+
+  // Before a session, choosing a task computes nothing: Run waits for one, then samples and computes it.
+  const fresh = harness({[toy]: null});
+  await fresh.ctx.load(toy);
+  assert.equal(fresh.nodes["#run"].disabled, true);
+  await fresh.ctx.selectDecisionTask("inspection-access");
+  assert.equal(fresh.calls.length, 0);
+  assert.equal(fresh.nodes["#run"].disabled, false);
+  assert.equal(fresh.nodes["#decision-tasks"].children[0].attrs["aria-pressed"], "true");
+  fresh.ctx.post = async (url, body) => {
+    fresh.calls.push({url, body: clone(body)});
+    return url.endsWith("/query") ? session(toy, false) : session(toy, false, false);
+  };
+  await fresh.ctx.run();
+  assert.deepEqual(fresh.calls.map(c => c.url), ["/api/session", "/api/session/query"]);
+  assert.equal(fresh.calls[1].body.query.decision, "inspect");
 
   // Typed observations can target any asset and always use the actual drafting endpoint.
   const live = harness({[toy]: session(toy, false), [ema]: session(ema)});

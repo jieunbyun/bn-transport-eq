@@ -269,6 +269,18 @@ def test_search_merges_both_lists_once_each(fallback):
     assert next(e for e in events if e["event_id"] == "both")["source"] == "shakecast"
 
 
+def test_an_event_before_1970_is_read_on_every_platform(tmp_path, monkeypatch):
+    # The catalogue's time is milliseconds since 1970: negative before it, which datetime.fromtimestamp
+    # refuses on Windows. The 1966 Xingtai earthquake, the Hebei example's event, is one.
+    xingtai = {"id": "iscgem849480", "properties": {"mag": 6.8, "time": -119052562000, "place": "Hebei"},
+               "geometry": {"coordinates": [114.9, 37.5, 10.0]}}
+    source = shakemap.ComcatSource(cache_dir=tmp_path)
+    monkeypatch.setattr(source, "_get_json", lambda params: {"features": [xingtai]})
+    (event,) = source.search((112.0, 35.0, 121.0, 43.0))
+    assert event["time"] == "1966-03-25T01:50:38+00:00"
+    assert shakemap.utc_from_ms(-2208988800000).isoformat() == "1900-01-01T00:00:00+00:00"
+
+
 def test_an_unknown_event_is_reported_as_such_not_as_an_outage(tmp_path, monkeypatch):
     from urllib.error import HTTPError
 
@@ -296,12 +308,12 @@ def test_a_shakemap_supplies_sa1_to_the_hebei_bn(shakecast_dir):
                             "parameters": {"hazard.shakemap": {"event_id": "ev1"}}, "samples": 100})
     summary = result["targets"][0]["summary"]
     assert summary["p50"] == pytest.approx(exp(ln_sa_field(site["lat"], site["lon"])), rel=1e-3)
-    assert result["computed"] == ["hazard.spatial-correlation", "hazard.shakemap"]   # only what the target needs
+    assert result["computed"] == ["hazard.shakemap"]                     # only what the target needs
     assert any("ShakeMap ev1 version 1" in w for w in result["warnings"])
     assert any("no seismic station" in w for w in result["warnings"])
 
 
-def test_nearby_sites_share_their_residuals_unless_told_otherwise(shakecast_dir):
+def test_nearby_sites_share_their_shaking_unless_told_otherwise(shakecast_dir):
     write_grid(shakecast_dir / "ev3" / "ev3-1", "ev3", 1, sigma=0.6)
     sites = engine.compile_query({"assembly": "hebei-transport/shakemap"}).network.rows("Bridge")
     a, b = min(((x, y) for i, x in enumerate(sites) for y in sites[i + 1:]),
@@ -310,7 +322,7 @@ def test_nearby_sites_share_their_residuals_unless_told_otherwise(shakecast_dir)
     def correlation(set_id):
         compiled = engine.compile_query({"assembly": "hebei-transport/shakemap",
                                          "parameters": {"hazard.shakemap": {"event_id": "ev3"}},
-                                         "parameter_sets": {"hazard.spatial-correlation": set_id}})
+                                         "parameter_sets": {"spatial-correlation": set_id}})
         x = engine.sample_nodes(compiled, 20000, seed=5)
         return np.corrcoef(np.log(x[f"SA(1.0)::{a['id']}"]), np.log(x[f"SA(1.0)::{b['id']}"]))[0, 1]
 

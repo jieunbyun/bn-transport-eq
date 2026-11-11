@@ -1,10 +1,9 @@
 {
   "$schema": "../../schema/meta/parameter-sets.schema.json",
-  "function": "hazard.spatial-correlation",
+  "model": "spatial-correlation",
   "source": {
     "citation": "Jayaram, N. and Baker, J. W. (2009). Correlation model for spatially distributed ground-motion intensities. EESD 38(15), 1687-1708; ranges from its eqs. for b(T).",
-    "truncation": "3 standard deviations is a modelling choice, stated here; null removes it.",
-    "matching": "Pick the set whose period matches the IM the field multiplies: pga for PGA, sa1p0 for SA(1.0). Jayaram & Baker (2009) gives no model for PGV."
+    "matching": "Pick the set whose period matches the IM of the field: pga for PGA, sa1p0 for SA(1.0). Jayaram & Baker (2009) gives no model for PGV."
   },
   "sets": [
     {
@@ -13,8 +12,7 @@
       "values": {
         "model": "jayaram-baker-2009",
         "period_s": 0.0,
-        "vs30_clustered": false,
-        "truncation_level": 3
+        "vs30_clustered": false
       }
     },
     {
@@ -23,8 +21,7 @@
       "values": {
         "model": "jayaram-baker-2009",
         "period_s": 0.3,
-        "vs30_clustered": false,
-        "truncation_level": 3
+        "vs30_clustered": false
       }
     },
     {
@@ -33,8 +30,7 @@
       "values": {
         "model": "jayaram-baker-2009",
         "period_s": 1.0,
-        "vs30_clustered": false,
-        "truncation_level": 3
+        "vs30_clustered": false
       }
     },
     {
@@ -43,16 +39,14 @@
       "values": {
         "model": "jayaram-baker-2009",
         "period_s": 3.0,
-        "vs30_clustered": false,
-        "truncation_level": 3
+        "vs30_clustered": false
       }
     },
     {
       "id": "independent.any-im",
       "label": "Independent bridges (no spatial correlation)",
       "values": {
-        "model": "independent",
-        "truncation_level": 3
+        "model": "independent"
       }
     }
   ]

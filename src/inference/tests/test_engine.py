@@ -101,4 +101,5 @@ def test_describe_lists_what_can_be_asked_and_set():
     assert gmm["current"] is None and gmm["by_location"] == {"campbell-2003.ema-script-sa1": 129}
     shakemap = describe(SHAKEMAP)["settable"]
     assert "event_id" in {p["name"] for p in shakemap["parameters"]}
-    assert {c["function"] for c in shakemap["parameter_sets"]} >= {"hazard.spatial-correlation"}
+    correlation = {c["function"]: c for c in shakemap["parameter_sets"]}["spatial-correlation"]
+    assert correlation["current"] == "jayaram-baker-2009.sa1p0" and len(correlation["choices"]) == 5

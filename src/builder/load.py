@@ -5,6 +5,7 @@
       quantities.json           types that flow between functions
       entities.json             plates: tables of rows, with foreign keys
       functions/<id>.json       typed signatures, one file each
+      models/<id>.json          parts of a function chosen on their own (a hazard field's correlation)
     instances/                  what does exist, filed by the role of the function it fills
       <role>/*.json             parameter sets: GMMs under hazard/, curves under fragility/, ...
     examples/                   networks the tools are shown and tested on
@@ -91,8 +92,9 @@ class Library:
     quantities: dict[str, dict[str, Any]]
     entities: dict[str, dict[str, Any]]
     functions: dict[str, dict[str, Any]]
-    parameter_sets: dict[str, dict[str, Any]]      # id -> set, plus "function" and "file"
+    parameter_sets: dict[str, dict[str, Any]]      # id -> set, plus "function" (or "model") and "file"
     implementations: dict[str, Any] = field(default_factory=dict)   # function id -> probability class
+    models: dict[str, dict[str, Any]] = field(default_factory=dict)  # schema/models: id -> model
 
     def kernel(self, function_id: str) -> Any:
         return self.implementations[function_id]
@@ -236,24 +238,41 @@ def load_library(schema: Path = SCHEMA, instances: Path = INSTANCES) -> Library:
         if fn["id"] in lib.functions:
             problems.append(f"{rel(path)}: duplicate function id {fn['id']!r}")
         lib.functions[fn["id"]] = fn
+    for path in sorted((schema / "models").glob("*.json")):
+        model = read_json(path, "model.schema.json", problems)
+        if model is None:
+            continue
+        if path.stem != model["id"]:
+            problems.append(f"{rel(path)}: file must be named {model['id']}.json")
+        try:
+            Draft202012Validator.check_schema(model["instance_schema"])
+        except SchemaError as exc:
+            problems.append(f"{rel(path)}: instance_schema is not a valid JSON Schema: {exc.message}")
+            continue
+        lib.models[model["id"]] = model
     for fn in lib.functions.values():
         _check_function(fn, lib, f"functions/{fn['id']}.json", problems)
+        if "correlation_model" in fn and fn["correlation_model"] not in lib.models:
+            problems.append(f"functions/{fn['id']}.json: correlation_model {fn['correlation_model']!r} is not in "
+                            "schema/models/")
 
     for path in sorted(instances.glob("*/*.json")):
         data = read_json(path, "parameter-sets.schema.json", problems)
         if data is None:
             continue
-        fn = lib.functions.get(data["function"])
-        if fn is None:
-            problems.append(f"{rel(path)}: function {data['function']!r} is not in the schema")
+        # The sets parameterise a function, or a model a function uses (its correlation).
+        owner = lib.functions.get(data["function"]) if "function" in data else lib.models.get(data["model"])
+        if owner is None:
+            kind = "function" if "function" in data else "model"
+            problems.append(f"{rel(path)}: {kind} {data[kind]!r} is not in the schema")
             continue
-        if "instance_schema" not in fn:
-            problems.append(f"{rel(path)}: {fn['id']} takes no parameters")
+        if "instance_schema" not in owner:
+            problems.append(f"{rel(path)}: {owner['id']} takes no parameters")
             continue
-        if path.parent.name != fn["role"]:
-            problems.append(f"{rel(path)}: {fn['id']} has role {fn['role']!r}, so its sets belong in "
-                            f"{rel(instances / fn['role'])}/")
-        validator = Draft202012Validator(fn["instance_schema"])
+        if path.parent.name != owner["role"]:
+            problems.append(f"{rel(path)}: {owner['id']} has role {owner['role']!r}, so its sets belong in "
+                            f"{rel(instances / owner['role'])}/")
+        validator = Draft202012Validator(owner["instance_schema"])
         for item in data["sets"]:
             if item["id"] in lib.parameter_sets:
                 problems.append(f"{rel(path)}: duplicate parameter-set id {item['id']!r}")
@@ -261,7 +280,7 @@ def load_library(schema: Path = SCHEMA, instances: Path = INSTANCES) -> Library:
                 at = "/".join(str(p) for p in error.absolute_path) or "(values)"
                 problems.append(f"{rel(path)}: {item['id']}: {at}: {error.message}")
             lib.parameter_sets[item["id"]] = {
-                **item, "function": fn["id"], "file": rel(path),
+                **item, "function": data.get("function"), "model": data.get("model"), "file": rel(path),
                 "source": {**data["source"], **item.get("source", {})},
             }
 

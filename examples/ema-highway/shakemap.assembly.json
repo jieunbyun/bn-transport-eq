@@ -6,18 +6,15 @@
   "description": "The 2020 M3.6 Buzzards Bay earthquake's USGS ShakeMap, the one recorded map that covers every bridge (it peaks at about 0.003 g, so damage is negligible). Pick another event, or a recent one, from the Earthquakes panel; a map that does not reach every bridge is refused. Sampling fetches the map unless it is cached.",
   "bindings": [
     {
-      "function": "hazard.spatial-correlation",
-      "parameter_set": "jayaram-baker-2009.sa1p0",
-      "note": "Its period matches the IM below. Swap for independent.any-im to see what the correlation changes."
-    },
-    {
       "function": "hazard.shakemap",
       "parameters": {
         "event_id": "us7000cc4d",
         "imt": "SA(1.0)",
         "version": null,
         "source": null
-      }
+      },
+      "correlation": "jayaram-baker-2009.sa1p0",
+      "note": "ln SA at the bridges is one Gaussian field: the map's median and sigma at each bridge, correlated by this set (its period matches the IM). Swap for independent.any-im to see what the correlation changes."
     },
     {
       "function": "observation.intensity",

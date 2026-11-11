@@ -35,7 +35,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -65,6 +65,15 @@ IMT_FIELDS = {
     "SA(1.0)": ("PSA10", "STDPSA10", _TO_G),
     "SA(3.0)": ("PSA30", "STDPSA30", _TO_G),
 }
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def utc_from_ms(ms: float) -> datetime:
+    """A catalogue time (milliseconds since 1970, UTC) as a datetime. Not datetime.fromtimestamp, which
+    fails on Windows for times before 1970, and the catalogue goes back to 1900."""
+    return _EPOCH + timedelta(milliseconds=ms)
 
 
 class ShakeMapError(ValueError):
@@ -355,7 +364,7 @@ class ComcatSource:
             lon, lat, depth = feature["geometry"]["coordinates"]
             events.append({
                 "event_id": feature["id"], "magnitude": props.get("mag"),
-                "time": datetime.fromtimestamp(props["time"] / 1000, timezone.utc).isoformat(timespec="seconds"),
+                "time": utc_from_ms(props["time"]).isoformat(timespec="seconds"),
                 "place": props.get("place"), "lat": lat, "lon": lon, "depth_km": depth,
                 "mmi": props.get("mmi"), "updated": props.get("updated"), "source": "comcat",
             })

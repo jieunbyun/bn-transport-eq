@@ -71,6 +71,10 @@
         "note": {
           "type": "string"
         },
+        "correlation": {
+          "description": "For a function with a correlation_model: the parameter set of that model correlating the rows (e.g. \"jayaram-baker-2009.sa1p0\"). Without it the rows are independent.",
+          "type": "string"
+        },
         "parameter_set_by_location": {
           "description": "Parameter-set ids, in order of preference. Each row gets the first whose region contains its lat/lon, so a network is described by the models made for where it is; a row no listed region covers is an error.",
           "type": "array",

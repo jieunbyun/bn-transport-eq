@@ -84,15 +84,16 @@ on the same IM:
   everywhere with `parameter_sets`.
 - **ShakeMap** (`hazard.shakemap`): the map is the event's own data, so θ names the
   event. Each bridge reads its median from `grid.xml` and its σ from `uncertainty.xml`
-  at its lat/lon; its one parent is its residual, `GMResidual[bridge]`.
+  at its lat/lon.
 
-Spatial correlation lives in that residual: `hazard.spatial-correlation` draws
-`GMResidual` jointly over the whole `Bridge` plate (`drawKind: Joint`), with Jayaram &
-Baker (2009) or, as a parameter set, independent bridges. Making it a node rather than
-burying it in the ShakeMap kernel keeps the dependence visible in the BN, where
-observed intensities could later condition it. A GMM with a between/within-event
-split would add an inter-event residual on `Event` and reuse the same field for
-the within-event part: new functions and ports, no new kind of record.
+Either way the IM is one Gaussian field over the whole `Bridge` plate (`drawKind:
+Joint`): ln IM ~ N(μ, D R D) with D = diag(σ), μ and σ from the function and R the
+correlation between bridges. R is chosen apart from the function's own parameters:
+the function names a `correlation_model` (`schema/models/spatial-correlation.json`),
+and a binding picks one of its sets with `"correlation": "jayaram-baker-2009.sa1p0"`
+(Jayaram & Baker 2009 at the IM's period), or leaves it out for independent bridges.
+A query swaps it with `"parameter_sets": {"spatial-correlation": "<set id>"}`. There
+is no residual node: observations of ground motion enter only through `SAObs`.
 
 ## Fragility: one function, curves as instances
 
