@@ -75,5 +75,5 @@ def test_an_observation_says_it_reweights_and_why_it_resamples(toy_model):
         entry = session.observe("SystemState::n4", 0)
     assert entry["update"] == "sampled again"
     assert said[0] == "Reweighting…"
-    assert said[1] == f"ESS {entry['ess'] * 1000:,.0f} / 1,000. Too low, so resampling…"
+    assert said[1] == f"ESS {entry['ess'] * 1000:,.0f} / 1,000 ({entry['ess']:.1%}). Too low, so resampling…"
     report_progress("outside any computation: nowhere to go")    # and no error

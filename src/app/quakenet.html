@@ -306,7 +306,7 @@ details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin-
   <label class="samples">samples <input type="number" id="samples" min="100" max="1000000" step="10000" value="100000"></label>
   <button class="primary" id="run">Run</button>
   <span class="sub" id="status"></span>
-  <button id="new-session" title="Start a new session with new memory; the current one is kept in records/sessions/archive/">New session</button>
+  <button id="new-session" title="Clear the session, as when the page first opens: nothing is computed until you choose a decision task and press Run. The current session is kept in records/sessions/archive/">New session</button>
   <button id="quakes-btn" aria-expanded="false" aria-controls="quakes" title="Recent earthquakes with a USGS ShakeMap near the networks, and past ones near this network">Earthquakes<span class="badge" id="quakes-badge"></span></button>
   <button id="theme" title="Toggle light and dark">Theme</button>
   <button id="stop" disabled title="Stop running Bayesian-network computations and keep the last completed results">Stop</button>
@@ -1442,6 +1442,22 @@ async function run() {
 }
 
 
+// New session: the page as when it first opens on this example, with nothing computed. The session on screen is
+// archived (records/sessions/archive/), and the chosen decision tasks, the scenario settings (which live with the
+// session) and a picked earthquake are cleared; Run then waits for a task to be chosen.
+async function newSession() {
+  if (state.loading || panelBusy || !state.ex) return;
+  const id = state.ex.assembly.id;
+  try {
+    await post("/api/session/new", {assembly: id});
+  } catch (err) { setStatus(err.message, true); return; }
+  setChosenTasks([]);
+  state.pick = null;
+  await load(id);
+  if (state.ex && !state.session) setStatus("New session: choose a decision task, then press Run.");
+}
+
+
 // ---- decision task and observation entry ---------------------------------------------------------------
 const pending = { query: null, evidence: null };
 let panelBusy = false, agentReady = false;
@@ -1952,7 +1968,7 @@ $("#example").addEventListener("change", e => load(e.target.value));
 $("#run").addEventListener("click", () => run());
 $("#stop").addEventListener("click", () => stopInference());
 // A new session, and new memory: the current one is kept in records/sessions/archive/ by the server.
-$("#new-session").addEventListener("click", () => run());
+$("#new-session").addEventListener("click", () => newSession());
 $("#theme").addEventListener("click", () => {
   const dark = document.documentElement.dataset.theme
     ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;

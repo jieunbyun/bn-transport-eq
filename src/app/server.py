@@ -32,6 +32,7 @@ Standard library only. Endpoints:
                                                   one variable's distribution given the evidence so far
     POST /api/session/draft      {assembly, kind: query | evidence, text}
                                                   the assistant's draft from a sentence; nothing is added
+    POST /api/session/new        {assembly}         archive the example's session and keep none, as before its first Run
     POST /api/session/stop       {request_id}       stop a running update, keeping its previous session
     GET  /api/session/progress?request_id=<id>      what a running update is doing now (reweighting, resampling)
 """
@@ -539,6 +540,8 @@ class Handler(BaseHTTPRequestHandler):
                     "See the server log for the full error.")}, HTTPStatus.INTERNAL_SERVER_ERROR)
         if path in {"/api/session", "/api/session/query", "/api/session/evidence"}:
             return self._session(path)
+        if path == "/api/session/new":
+            return self._new_session()
         if path == "/api/session/draft":
             return self._draft()
         self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
@@ -567,6 +570,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "; ".join(problems)}, HTTPStatus.BAD_REQUEST)
         except Exception as exc:
             return self._json({"error": _readable_api_error(exc)}, HTTPStatus.BAD_GATEWAY)
+
+    def _new_session(self) -> None:
+        """New session: the example's session is archived and none is kept, so the page is as on first opening, with
+        nothing computed until Run."""
+        try:
+            assembly = self._read_request().get("assembly", "")
+            assembly_path(assembly)                            # an example the server knows, or a RegistryError
+            with session_update_lock():
+                archive_session(assembly)
+                _sessions.pop(assembly, None)
+            return self._json({"session": None})
+        except (RegistryError, ValueError, json.JSONDecodeError) as exc:
+            problems = exc.problems if isinstance(exc, RegistryError) else [str(exc)]
+            return self._json({"error": "; ".join(problems)}, HTTPStatus.BAD_REQUEST)
 
     def _session(self, path: str) -> None:
         """Start a session, or add a decision query or an observation to it; reply with its state."""

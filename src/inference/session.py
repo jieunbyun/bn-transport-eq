@@ -247,7 +247,7 @@ class Session:
         lw = self.lw + dlw
         ess = self.ess(lw) if torch.isfinite(lw).any() else 0.0
         if ess < self.threshold:
-            report_progress(f"ESS {ess * self.n:,.0f} / {self.n:,}. Too low, so resampling…")
+            report_progress(f"ESS {ess * self.n:,.0f} / {self.n:,} ({ess:.1%}). Too low, so resampling…")
             self._sample()
             update = "sampled again"
         else:
