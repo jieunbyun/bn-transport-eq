@@ -34,7 +34,7 @@ from src.builder.kernels import Probability
 from . import cliques
 
 N_GROUP = 20
-SAMPLER = {"n_chain": 100, "n_burn": 200, "n_keep": 2_000, "bridge": (8, 128)}
+SAMPLER = {"n_chain": 100, "n_burn": 200, "n_keep": 2_000, "bridge": 8}
 
 
 WORDS = {"EdgeOpen": {"False": "closed", "True": "open"}}     # states as an operator says them
@@ -142,6 +142,8 @@ class Session:
         s = cls.__new__(cls)
         s.t, s.probs, s.variables = t, probs, variables
         s.population, s.threshold, s.sampler, s.seed = meta["population"], meta["threshold"], meta["sampler"], meta["seed"]
+        if isinstance(s.sampler.get("bridge"), (tuple, list)):        # saved as (partner tuples, candidates)
+            s.sampler["bridge"] = s.sampler["bridge"][0]                # before rsr 0.3.1: keep the partners
         s.evidence, s.queries, s.timeline, s.elapsed = meta["evidence"], meta["queries"], meta["timeline"], meta["elapsed"]
         s.producer = {v.name: p for p in probs.values() for v in p.childs}
         s.order = list(probs.values())

@@ -32,7 +32,7 @@ SETTINGS = {   # D 4 = complete (the edge closed); EdgeOpen 0 closed; SystemStat
             ("T4 inspection: b4 complete", "DamageState.HazusBridge::b4", 4, True),
         ]},
 }
-SAMPLER = {"n_chain": 100, "n_burn": 200, "n_keep": 10_000, "bridge": (8, 128)}
+SAMPLER = {"n_chain": 100, "n_burn": 200, "n_keep": 10_000, "bridge": 8}
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--example", choices=list(SETTINGS), default="toy-ca")

@@ -44,7 +44,7 @@ SETTINGS = {   # D 2 = moderate, 3 = extensive; EdgeOpen 0 closed, 1 open; Syste
         }},
 }
 N_GROUP = 20
-SAMPLER = {"n_chain": 100, "n_burn": 200, "n_keep": 10_000, "bridge": (8, 128)}
+SAMPLER = {"n_chain": 100, "n_burn": 200, "n_keep": 10_000, "bridge": 8}
 BINS = torch.linspace(-4.5, 1.0, 111, dtype=torch.float64)          # ln SA, for the posterior densities
 
 parser = argparse.ArgumentParser()

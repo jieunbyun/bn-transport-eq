@@ -13,7 +13,7 @@ dependencies:
       # The system functions: network evaluation (ndtools.fun_binary_graph).
       - ndtools-duco>=0.1.10
       # Rule extraction for the system functions (import name rsr).
-      - rsr-duco>=0.2.0
+      - rsr-duco>=0.3.1
       - torch
       # The Bayesian-network engine.
       - tbnpy>=0.3.5

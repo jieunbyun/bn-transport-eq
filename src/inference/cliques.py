@@ -334,29 +334,25 @@ def sa_e_down(t, ms, fld, sa, e, generator=None):
       ["∝ m_up^Sa(E) · Π_k m_up^Sys(E)", "---",
        "E takes one step of RSR-MCMC   if any S is in the evidence",
        "E is drawn directly from m_up^Sa(E)   otherwise"], ["rsr", "multinomial"])
-def root_absorb(q, refs_list, state, bridge=(8, 128), generator=None):
+def root_absorb(q, mdl, state, bridge=8, generator=None):
     """Clique (E) absorbs q, the message from clique (SA, E), (C, n, 2) one prior per chain, and the
     observed systems' boxes, and moves E one step towards its belief, for C chains.
-    With boxes (refs_list from _cut): a certificate MCMC sweep from state = (x, gamma, c), a
-    step_multi over the observed systems then, unless bridge is None, a bridge move with
-    bridge = (partner tuples m, candidates N) and the labels redrawn. Without boxes: a direct draw
-    from q, as each chain's E given SA is then independent by edge; state is (x, None, None).
-    Returns the new state, x one-hot (C, n, 2), and n_ops = E vectors drawn."""
+    With boxes (mdl, the rsr.mcmc model of the boxes from _cut): one rsr.mcmc.step under the prior q
+    of each chain from state, an rsr.mcmc.State (E as state indices (C, n), the labels and their
+    memberships): a sweep over the observed systems then, unless bridge is None or 0, a tuple jump
+    with bridge partner tuples. The step leaves P(E | SA, evidence) invariant, as the Gibbs sweep needs. Without boxes
+    (mdl None): a direct draw from q, as each chain's E given SA is then independent by edge.
+    Returns the new state and n_ops = E vectors drawn."""
     from rsr import mcmc
 
-    x, gamma, c = state
-    C = len(x)
+    C = len(state.x)
     p = q / q.sum(dim=-1, keepdim=True)
-    if not refs_list:
+    if mdl is None:
         e = torch.multinomial(p.expand(C, -1, -1).reshape(-1, 2), 1, generator=generator).view(C, -1)
-        return (torch.nn.functional.one_hot(e, 2), None, None), C
-    x, gamma, c, _ = mcmc.step_multi(x, gamma, c, refs_list, p, generator)
-    n_ops = C * len(refs_list)
-    if bridge is not None:
-        x, c, _, _ = mcmc.bridge(x, c, refs_list, p, n_cand=bridge[1], n_partner=bridge[0], generator=generator)
-        gamma = mcmc.labels(x, refs_list, generator)
-        n_ops += C * bridge[1]
-    return (x, gamma, c), n_ops
+        return mcmc.State(e, None, None), C
+    n_partner = bridge or 0
+    state, _ = mcmc.step(mcmc.with_probs(mdl, p.expand(C, -1, -1)), state, generator, n_partner=n_partner)
+    return state, C * len(mdl.systems) + C * n_partner
 
 
 def _cut(certs, support):
@@ -429,7 +425,7 @@ def _forward(t, n, generator):
     return (sa, e, d), n
 
 
-def sample(t, ev, n_chain=100, n_burn=200, n_keep=10_000, bridge=(8, 128), seed=0, sa0=None, do=None, e0=None):
+def sample(t, ev, n_chain=100, n_burn=200, n_keep=10_000, bridge=8, seed=0, sa0=None, do=None, e0=None):
     """Rows from P(everything | ev) under do (intervene()), N = n_keep * n_chain of them.
 
     Nothing observed: every up message is 1, so one pass down the tree is exact: N independent rows
@@ -468,22 +464,18 @@ def sample(t, ev, n_chain=100, n_burn=200, n_keep=10_000, bridge=(8, 128), seed=
                                for c in t["edges"]])                     # (n, 2), the E the evidence on D and E allows
         refs_list = _cut([r for r in certs if r is not None], support)
         if refs_list:
-            state = mcmc.init_multi(refs_list, n_chain, probs=q / q.sum(dim=-1, keepdim=True), generator=g)
-            if e0 is not None:                      # warm start: E where it already is, if inside the boxes
-                x0 = torch.nn.functional.one_hot(e0.long(), 2).to(state[0].dtype)
-                inside = torch.stack([mcmc._membership(x0, r).sum(dim=1) > 0 for r in refs_list], dim=1).all(dim=1)
-                x = torch.where(inside[:, None, None], x0, state[0])
-                state = (x, mcmc.labels(x, refs_list, g),
-                         torch.stack([mcmc._membership(x, r).sum(dim=1) for r in refs_list], dim=1))
+            # the boxes are built once; each step swaps in the chains' current prior
+            mdl = mcmc.model(refs_list, (q / q.sum(dim=-1, keepdim=True)).expand(n_chain, -1, -1))
+            state = mcmc.start(mdl, n_chain, g, x0=e0)   # warm start: E where it already is, if in the boxes
         else:
-            state = (torch.zeros(n_chain, len(ms), 2, dtype=torch.long), None, None)
+            mdl, state = None, mcmc.State(torch.zeros(n_chain, len(ms), dtype=torch.long), None, None)
         kept_sa, kept_e = [], []
         for sweep in range(n_burn + n_keep):
             check_cancelled()
             if sweep:
                 q = timed("sa_e_up", sa_e_up, t, ms, sa)
-            state = timed("root_absorb", root_absorb, q, refs_list, state, bridge, generator=g)
-            e = state[0].argmax(dim=2)
+            state = timed("root_absorb", root_absorb, q, mdl, state, bridge, generator=g)
+            e = state.x
             sa = timed("sa_e_down", sa_e_down, t, ms, fld, sa, e, generator=g)
             if sweep >= n_burn:
                 kept_sa.append(sa)

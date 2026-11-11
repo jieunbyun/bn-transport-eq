@@ -65,10 +65,11 @@ for col, (name, case) in enumerate(cases.items()):
 handles = [plt.Line2D([], [], ls="", marker=m, ms=7, color=c, mec="white") for _, c, m in STEPS.values()]
 fig.legend(handles, list(STEPS), loc="lower center", ncol=len(STEPS), frameon=False, fontsize=10,
            title="drawn by (error bars: 2 SE; grey band: |z| < 3)", title_fontsize=9)
+bridge = results["sampler"]["bridge"]                     # older results: (partner tuples, candidates)
+bridge = bridge[0] if isinstance(bridge, (tuple, list)) else bridge
 fig.suptitle(f"Clique-tree sampler against MCS on {EXAMPLE} (ln SA correlated, range {results['range_km']:g} km): "
              f"{results['sampler']['n_chain']} chains x "
-             f"{results['sampler']['n_keep']} kept sweeps, bridge m={results['sampler']['bridge'][0]}, "
-             f"N={results['sampler']['bridge'][1]}", fontsize=12, color=INK)
+             f"{results['sampler']['n_keep']} kept sweeps, tuple jump m={bridge}", fontsize=12, color=INK)
 fig.tight_layout(rect=(0, 0.06, 1, 0.97))
 out = SOURCE.with_name(SOURCE.stem.replace("results", "comparison") + ".png")
 fig.savefig(out, dpi=130)
