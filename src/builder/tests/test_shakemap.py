@@ -269,6 +269,18 @@ def test_search_merges_both_lists_once_each(fallback):
     assert next(e for e in events if e["event_id"] == "both")["source"] == "shakecast"
 
 
+def test_an_event_before_1970_is_read_on_every_platform(tmp_path, monkeypatch):
+    # The catalogue's time is milliseconds since 1970: negative before it, which datetime.fromtimestamp
+    # refuses on Windows. The 1966 Xingtai earthquake, the Hebei example's event, is one.
+    xingtai = {"id": "iscgem849480", "properties": {"mag": 6.8, "time": -119052562000, "place": "Hebei"},
+               "geometry": {"coordinates": [114.9, 37.5, 10.0]}}
+    source = shakemap.ComcatSource(cache_dir=tmp_path)
+    monkeypatch.setattr(source, "_get_json", lambda params: {"features": [xingtai]})
+    (event,) = source.search((112.0, 35.0, 121.0, 43.0))
+    assert event["time"] == "1966-03-25T01:50:38+00:00"
+    assert shakemap.utc_from_ms(-2208988800000).isoformat() == "1900-01-01T00:00:00+00:00"
+
+
 def test_an_unknown_event_is_reported_as_such_not_as_an_outage(tmp_path, monkeypatch):
     from urllib.error import HTTPError
 

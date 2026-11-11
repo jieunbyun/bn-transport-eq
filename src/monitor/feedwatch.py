@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode
@@ -244,7 +244,9 @@ def poll(
 
 
 def _when(ms: Any) -> str:
-    return datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if ms else "time unknown"
+    # Not datetime.fromtimestamp, which fails on Windows for times before 1970.
+    when = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=ms) if ms else None
+    return when.strftime("%Y-%m-%d %H:%M UTC") if when else "time unknown"
 
 
 def compose_email(events: list[dict[str, Any]]) -> tuple[str, str]:
