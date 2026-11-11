@@ -28,7 +28,7 @@ import math
 import time
 
 import torch
-from src.cancellation import check_cancelled
+from src.cancellation import check_cancelled, report_progress
 
 from src.builder.kernels import Probability
 from src.builder.kernels.observation import ObservedIntensity
@@ -242,16 +242,20 @@ class Session:
         previous = self._snapshot()
         self.evidence[var] = value
         started = time.perf_counter()
+        report_progress("Reweighting…")
         rows, dlw = self._reweight(var, value)
         lw = self.lw + dlw
         ess = self.ess(lw) if torch.isfinite(lw).any() else 0.0
         if ess < self.threshold:
+            report_progress(f"ESS {ess * self.n:,.0f} / {self.n:,}. Too low, so resampling…")
             self._sample()
             update = "sampled again"
         else:
             self.rows, self.lw = rows, lw
             update = "reweighted"
             self.elapsed = time.perf_counter() - started
+        if self.queries:
+            report_progress("Updating the decision tasks…")
         entry = {"at": at or _now(), "kind": "evidence", "text": text or f"{var} = {self._label(var, value)}",
                  "evidence": {"variable": var, "value": value, "label": self._label(var, value), "source": source},
                  "update": update, "ess": ess, "values": {q: self._values(s) for q, s in self.queries.items()}}

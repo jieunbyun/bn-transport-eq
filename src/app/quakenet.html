@@ -336,7 +336,7 @@ details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin-
         <section id="map-side" aria-label="Decision task and observations">
           <div class="side-panel" id="panel-query">
             <h2>Decision task</h2>
-            <p class="meta">Choose the task to track as observations arrive.</p>
+            <p class="meta">Choose the task to track as observations arrive. Run needs one, and computes it with the samples.</p>
             <div id="decision-tasks" role="group" aria-label="Available decision tasks"></div>
             <p class="task-summary" id="task-summary"></p>
             <p class="meta" id="task-status" role="status" aria-live="polite"></p>
@@ -1363,12 +1363,24 @@ async function stopInference() {
   }));
 }
 
+// While the request runs, the status line follows what the server says it is doing (report_progress: reweighting,
+// then resampling if too little weight is left), asked every half second.
+const PROGRESS_POLL_MS = 500;
+
 async function sessionCall(url, body, busy) {
   const epoch = state.epoch, assembly = state.ex.assembly.id;
   const request = {id: crypto.randomUUID(), epoch, stopping: false};
   inferenceRequests.set(request.id, request);
   updateInferenceStop();
   setStatus(busy);
+  let said = null;
+  const poll = setInterval(async () => {
+    try {
+      const {progress} = await getJSON(`/api/session/progress?request_id=${encodeURIComponent(request.id)}`);
+      if (progress && progress !== said && inferenceRequests.has(request.id) && epoch === state.epoch && !request.stopping)
+        setStatus(said = progress);
+    } catch {}                                   // a missed tick only delays the next message
+  }, PROGRESS_POLL_MS);
   try {
     const session = await post(url, {assembly, ...body, request_id: request.id});
     if (epoch !== state.epoch) return false;
@@ -1383,16 +1395,23 @@ async function sessionCall(url, body, busy) {
     if (epoch === state.epoch) setStatus(err.message, true);
     throw err;
   } finally {
+    clearInterval(poll);
     inferenceRequests.delete(request.id);
     updateInferenceStop();
   }
 }
 
-// Run: a new session under the scenario settings (Assumptions), sampled with no evidence.
+// Run: a new session under the scenario settings (Assumptions), sampled with no evidence, then the decision tasks
+// computed on it (tasksForRun: those the session on screen tracks, and those chosen for the next run). Every session
+// tracks at least one, so Run waits until one is chosen; nothing is computed until Run (or a task's own click on an
+// open session). Queries drafted in the agent chat belong to the conversation, which a new session resets.
 async function run() {
   if (state.loading || panelBusy) return;
   const epoch = state.epoch;
   const samples = Math.round(Number($("#samples").value) || 200000);
+  const tracked = tasksForRun();
+  if (!tracked.length) { setStatus("Choose a decision task first: Run computes it with the samples.", true); return; }
+  setChosenTasks(tracked.map(task => task.id));
   setPanelBusy(true);
   try {
     const fetching = state.pick || (isShakemap() && !state.session) ? "Fetching the ShakeMap and sampling" : "Sampling";
@@ -1401,6 +1420,9 @@ async function run() {
       resetConversation();
       preparePanels();
       saveConversation();
+      for (const task of tracked)
+        if (epoch === state.epoch && state.session && !activeTaskQuery(task))
+          await sessionCall("/api/session/query", {query: task.query(taskUnit())}, task.busy);
     }
   } catch (err) {
     // A picked earthquake that cannot run leaves the previous session on screen: say so, or the page seems to
@@ -1426,13 +1448,32 @@ let panelBusy = false, agentReady = false;
 const messages = { query: [], evidence: [] };
 const observationUI = { mode: "form", kind: "reading", variable: "", value: "", source: "" };
 
-// Add further tasks here; the task selector and its active state are rendered from this catalogue.
+// Add further tasks here; the task selector and its active state are rendered from this catalogue. Each task: id,
+// title, description(unit), query(unit) (the decision query it adds to the session) and busy (the status while that
+// query is computed). Several may be chosen; Run computes every chosen one.
 const DECISION_TASKS = [{
   id: "inspection-access", title: "Prioritise bridge inspection",
+  busy: "Computing inspection priorities…",
   description: unit => `Maximise the number of ${unit} with access to key destinations. Repair inspected bridges if damaged.`,
   query: unit => ({name: `Inspection priority for ${unit === "people" ? "people's" : "towns'"} access`,
                    target: {kind: "cut_off"}, decision: "inspect"}),
 }];
+
+// The tasks chosen for the next Run, per example, kept in the browser. Choosing one computes nothing.
+function chosenTasks() {
+  if (!state.ex) return new Set();
+  try { return new Set(JSON.parse(store.get(`tasks.${state.ex.assembly.id}`) || "[]")); } catch { return new Set(); }
+}
+
+function setChosenTasks(ids) {
+  if (state.ex) store.set(`tasks.${state.ex.assembly.id}`, JSON.stringify([...new Set(ids)]));
+}
+
+// What Run computes: the tasks the session on screen tracks, and those chosen for the next run.
+function tasksForRun() {
+  const chosen = chosenTasks();
+  return DECISION_TASKS.filter(task => activeTaskQuery(task) || chosen.has(task.id));
+}
 
 function taskUnit() {
   return state.session?.unit || ((state.ex?.network?.tables?.Node || []).some(n => n.population != null) ? "people" : "towns");
@@ -1444,32 +1485,47 @@ function activeTaskQuery(task) {
 }
 
 function renderDecisionTasks() {
-  const box = $("#decision-tasks");
+  const box = $("#decision-tasks"), chosen = chosenTasks();
   box.innerHTML = "";
   for (const task of DECISION_TASKS) {
-    const active = activeTaskQuery(task), button = document.createElement("button");
+    const active = activeTaskQuery(task), picked = !active && chosen.has(task.id), button = document.createElement("button");
     button.type = "button";
     button.className = "task-card";
     button.dataset.task = task.id;
-    button.setAttribute("aria-pressed", String(!!active));
+    button.setAttribute("aria-pressed", String(!!active || picked));
     button.innerHTML = `<strong>${esc(task.title)}</strong><span>${esc(task.description(taskUnit()))}</span>` +
-      `<span class="task-state">${active ? "Active task" : "Select task"}</span>`;
+      `<span class="task-state">${active ? "Active task" : picked ? "Chosen: computed with Run" : "Select task"}</span>`;
     button.onclick = () => selectDecisionTask(task.id);
     box.append(button);
   }
-  const active = DECISION_TASKS.map(activeTaskQuery).find(Boolean);
-  $("#task-summary").textContent = active ? formulation("query", active).split("\n").slice(1).join("\n") : "";
-  $("#task-status").textContent = !state.session ? "Press Run to start a session." : active
-    ? "Priorities update whenever an observation is added." : "";
+  // Each tracked or chosen task's formula, computed or not: what Run, or the next observation, will give.
+  const shown = tasksForRun();
+  $("#task-summary").textContent = shown.map(task =>
+    formulation("query", activeTaskQuery(task) || task.query(taskUnit())).split("\n").slice(1).join("\n")).join("\n\n");
+  const computed = shown.length && shown.every(task => activeTaskQuery(task));
+  $("#task-status").textContent = !shown.length ? "Choose a decision task: Run computes it with the samples."
+    : !state.session ? "Press Run to sample and compute it."
+    : computed ? "Priorities update whenever an observation is added."
+    : "Computed when you press Run, or click the task to compute it on this session now.";
 }
 
+// Before a session, a click only chooses (or unchooses) a task for the next Run. With a session open, a click on a
+// task it does not track computes it on that session now, as the user has decided to.
 async function selectDecisionTask(id) {
   const task = DECISION_TASKS.find(t => t.id === id);
-  if (!task || !state.session || state.loading || panelBusy || activeTaskQuery(task)) return;
+  if (!task || state.loading || panelBusy || activeTaskQuery(task)) return;
+  const chosen = chosenTasks();
+  if (!state.session) {
+    if (chosen.has(id)) chosen.delete(id); else chosen.add(id);
+    setChosenTasks(chosen);
+    renderDecisionTasks(); updatePanelControls();
+    return;
+  }
+  setChosenTasks([...chosen, id]);
   const epoch = state.epoch;
   setPanelBusy(true);
   try {
-    await sessionCall("/api/session/query", {query: task.query(taskUnit())}, "Computing inspection priorities…");
+    await sessionCall("/api/session/query", {query: task.query(taskUnit())}, task.busy);
   } catch (err) {
     if (epoch === state.epoch) $("#task-status").textContent = err.message;
   } finally {
@@ -1560,10 +1616,10 @@ async function submitObservation() {
 function updatePanelControls() {
   updateInferenceStop();
   const blocked = !state.session || state.loading || panelBusy;
-  $("#run").disabled = $("#new-session").disabled = !state.ex || state.loading || panelBusy;
+  $("#run").disabled = $("#new-session").disabled = !state.ex || state.loading || panelBusy || !tasksForRun().length;
   for (const button of $("#decision-tasks").querySelectorAll("button")) {
     const task = DECISION_TASKS.find(t => t.id === button.dataset.task);
-    button.disabled = blocked || !!activeTaskQuery(task);
+    button.disabled = !state.ex || state.loading || panelBusy || !!activeTaskQuery(task);
   }
   for (const input of $("#observation-form").querySelectorAll("input, select, button"))
     input.disabled = blocked || !observationUI.variable || input.hidden;
@@ -1636,7 +1692,7 @@ function formulation(kind, d) {
     const value = typeof d.value === "number" ? `${d.value} g` : d.value;
     return `Evidence: ${d.variable} = ${value}${d.source ? ` (source: ${d.source})` : ""}`;
   }
-  const t = d.target || {}, w = s.unit === "people" ? "pop_k · " : "";
+  const t = d.target || {}, w = (s?.unit || taskUnit()) === "people" ? "pop_k · " : "";   // no session yet: a chosen task
   const of = given => ({
     cut_off: `Σ_k ${w}P(S_k = Fail | ${given})`,
     cut_off_at_least: `P(Σ_k ${w}1[S_k = Fail] ≥ ${t.at_least} | ${given})`,
@@ -1666,7 +1722,7 @@ async function addPending(kind, animate = false) {
   try {
     const added = await sessionCall("/api/session/evidence", {variable: d.variable, value: d.value, source: d.source || undefined,
                            at: new Date().toTimeString().slice(0, 8)},
-                           "Taking the observation in: reweighting, or sampling again if too little weight is left…");
+                           "Reweighting…");
     if (!added) return false;
     pending.evidence = null;
     const acknowledgement = `Added (${state.session.timeline.at(-1).update}).`;

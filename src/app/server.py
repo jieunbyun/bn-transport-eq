@@ -33,6 +33,7 @@ Standard library only. Endpoints:
     POST /api/session/draft      {assembly, kind: query | evidence, text}
                                                   the assistant's draft from a sentence; nothing is added
     POST /api/session/stop       {request_id}       stop a running update, keeping its previous session
+    GET  /api/session/progress?request_id=<id>      what a running update is doing now (reweighting, resampling)
 """
 
 from __future__ import annotations
@@ -137,6 +138,7 @@ def example(assembly_id: str) -> dict[str, Any]:
 _sessions: dict[str, Any] = {}
 _sessions_lock = threading.Lock()
 _inference_jobs: dict[str, threading.Event] = {}
+_inference_progress: dict[str, str] = {}           # request id -> what its computation is doing now
 _inference_jobs_lock = threading.Lock()
 # A Stop click can reach the server before its computation request registers.
 _early_stops: deque[str] = deque(maxlen=128)
@@ -154,12 +156,24 @@ def inference_job(request_id: str):
             _early_stops.remove(request_id)
             event.set()
         _inference_jobs[request_id] = event
+
+    def progress(text: str) -> None:
+        with _inference_jobs_lock:
+            _inference_progress[request_id] = text
+
     try:
-        with cancellable(event):
+        with cancellable(event, progress):
             yield
     finally:
         with _inference_jobs_lock:
             _inference_jobs.pop(request_id, None)
+            _inference_progress.pop(request_id, None)
+
+
+def inference_progress(request_id: str) -> str | None:
+    """What the running request is doing now (report_progress), or None if it has said nothing or has ended."""
+    with _inference_jobs_lock:
+        return _inference_progress.get(request_id)
 
 
 def stop_inference(request_id: str) -> None:
@@ -455,6 +469,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(session_of(assembly).distribution((params.get("node") or [""])[0]))
                 except ValueError as exc:
                     return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        if url.path == "/api/session/progress":
+            return self._json({"progress": inference_progress((parse_qs(url.query).get("request_id") or [""])[0])})
         if url.path == "/api/inference":
             # The clique tree's message passing as src/inference/cliques.py declares it, for the Clique tree tab.
             from src.inference import cliques
