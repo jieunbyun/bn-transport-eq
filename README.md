@@ -20,8 +20,8 @@ commands in Anaconda Prompt; on macOS or Linux, use a terminal with Conda availa
 Download the app:
 
 ```sh
-git clone https://github.com/jieunbyun/bn-transport-eq.git
-cd bn-transport-eq
+git clone https://github.com/jieunbyun/quakenet.git
+cd quakenet
 ```
 
 Create the Python environment and start the app:
@@ -39,7 +39,7 @@ The app opens at **http://127.0.0.1:8765**. Keep the terminal open while using i
 Run a baseline, select the decision task, then add observations and run another
 analysis. Use dropdown observations to try the app without configuring an LLM.
 
-To start it again later, open a terminal in the `bn-transport-eq` folder and run:
+To start it again later, open a terminal in the `quakenet` folder and run:
 
 ```sh
 conda activate quakenet
@@ -105,8 +105,8 @@ never touches the page's sessions. Every poll writes `heartbeat.json`, so run
 does:
 
 ```
-* * * * *    cd /path/to/bn-transport-eq && $PY -m src shakemap watch --once >> watch.log 2>&1
-*/10 * * * * cd /path/to/bn-transport-eq && $PY -m src shakemap heartbeat || <your alert command>
+* * * * *    cd /path/to/quakenet && $PY -m src shakemap watch --once >> watch.log 2>&1
+*/10 * * * * cd /path/to/quakenet && $PY -m src shakemap heartbeat || <your alert command>
 ```
 
 **Email alerts on AWS Lambda.** `src/monitor/feedwatch.py` is the feed-only

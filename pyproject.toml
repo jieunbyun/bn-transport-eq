@@ -1,5 +1,5 @@
 [project]
-name = "bn-transport-eq"
+name = "quakenet"
 version = "0.1.0"
 description = "Transport networks under seismic risk as Bayesian networks: schema, instances, builder, inference, language, app"
 readme = "README.md"
