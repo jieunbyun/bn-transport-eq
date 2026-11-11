@@ -476,7 +476,7 @@ async function load(id) {
     store.set("example", id);
     history.replaceState(null, "", `#example=${encodeURIComponent(id)}`);
     Object.assign(cliquePick, { obs: 0, local: 0, systems: 0 });
-    renderControls();
+    renderControls(); renderQuakeLine();
     if (!await loadSession(id, epoch)) return;
     restoreConversation();
     applyScenarioControls(); renderMap(); renderResults(); renderBN(); renderCliques(); renderSchema(); renderAssumptions();
@@ -1929,8 +1929,19 @@ function shakemapSetting(name) {
   return currentScenario().parameters?.[SHAKEMAP]?.[name] ?? p?.value;
 }
 
+// Earthquakes belong to a ShakeMap example: a GMM one has a fixed scenario, so it shows no Earthquakes button,
+// panel or new-earthquake notices (the page keeps polling, so switching to a ShakeMap example shows what came in).
+function renderQuakeControls() {
+  if (!state.ex) return;                         // still loading: leave the header as it was
+  const on = isShakemap();
+  $("#quakes-btn").hidden = !on;
+  if (!on) closeQuakes();
+  renderBadge(); renderNotices();
+}
+
 function renderQuakeLine() {
   const el = $("#quake-line");
+  renderQuakeControls();
   if (!state.ex || !isShakemap()) { el.innerHTML = ""; return; }
   const m = state.session?.shakemap, pick = state.pick;
   let h;
@@ -2040,13 +2051,14 @@ function openQuakes() {
 function closeQuakes() { $("#quakes").hidden = true; $("#quakes-btn").setAttribute("aria-expanded", "false"); }
 
 function renderBadge() {
-  $("#quakes-badge").textContent = quakes.unread ? String(quakes.unread) : "";
-  document.title = quakes.unread ? `(${quakes.unread}) quakenet` : "quakenet";
+  const unread = isShakemap() ? quakes.unread : 0;
+  $("#quakes-badge").textContent = unread ? String(unread) : "";
+  document.title = unread ? `(${unread}) quakenet` : "quakenet";
 }
 
 function renderNotices() {
   let h = "";
-  for (const id of quakes.fresh) {
+  for (const id of isShakemap() ? quakes.fresh : []) {
     const e = quakes.recent?.find(x => x.event_id === id);
     if (!e || quakes.dismissed.has(id)) continue;
     h += `<div class="item"><span>New earthquake: <b>${esc(mag(e.magnitude))}</b> ${esc(e.place || id)}, ${esc(quakeWhen(e.time))}, ` +
